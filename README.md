@@ -145,6 +145,12 @@ too; if so, leave it off.
   `soundboard_error.log` next to your settings. If the settings file is
   damaged, it's kept as `soundboard_config.json.broken` and the app starts
   with defaults.
+- **Others hear their own voices back:** PC audio is getting into your
+  virtual mic. Make sure your system's default playback device and
+  Discord's **Output Device** are your speakers/headphones, not the
+  virtual cable (`CABLE Input`, BlackHole), and that **Microphone** in
+  Soundboard is your real mic, not `CABLE Output` or `Stereo Mix`. The
+  app shows a red warning when it detects either problem.
 - **Download tab:** paste a video/clip URL and click "Download as MP3".
   The audio is saved into `Sounds/` and added to the board. Only download
   content you have the right to use; downloading may be against the

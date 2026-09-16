@@ -75,6 +75,8 @@ WINDOWS_HOSTAPIS = ("Windows WASAPI", "MME")
 MME_NAME_LENGTH = 31
 # Substrings that identify common virtual cables, preferred as the output.
 VIRTUAL_CABLE_HINTS = ("cable input", "blackhole", "vb-audio", "soundboard")
+# Inputs that carry what the PC plays rather than a real microphone.
+LOOPBACK_INPUT_HINTS = ("cable output", "blackhole", "stereo mix", "what u hear", "loopback", "wave out", "monitor of")
 
 COLOR_BG = "#121212"
 COLOR_SURFACE = "#1e1e1e"
@@ -595,6 +597,12 @@ class Soundboard:
             tab.configure(fg_color=COLOR_BG)
 
         self._build_device_selectors(board_tab)
+        # Holder stays packed so the warning can appear above the sound list.
+        warning_holder = tk.Frame(board_tab, bg=COLOR_BG, height=1)
+        warning_holder.pack(fill="x")
+        self.loop_warning = ctk.CTkLabel(
+            warning_holder, text="", text_color=COLOR_ERROR, justify="left", anchor="w", wraplength=800,
+        )
         self._build_sound_list(board_tab)
         self._build_controls(board_tab)
 
@@ -810,6 +818,36 @@ class Soundboard:
         self.audio_engine.sound_gain = self.config["sound_volume"] / 100
         self.audio_engine.start(input_device, output_device, monitor_device)
         self.audio_engine.set_monitor_muted(not self.config.get("hear_self", True))
+        self._update_loop_warning(input_device, output_device)
+
+    def _update_loop_warning(self, input_device, output_device):
+        """Warn about setups that send PC audio (e.g. other people's voices
+        from Discord) into the virtual mic, so they hear themselves."""
+        warnings = []
+        input_name = self.config.get("input_device") or ""
+        if input_device is not None and any(h in input_name.lower() for h in LOOPBACK_INPUT_HINTS):
+            warnings.append(
+                f"Microphone is set to \"{input_name}\", which carries PC audio, not your voice. "
+                "Pick your real microphone, or others will hear their own voices back."
+            )
+        default_output = self._system_default_device(output=True)
+        if output_device is not None and default_output is not None:
+            default_name = sd.query_devices(default_output)["name"]
+            if any(h in default_name.lower() for h in VIRTUAL_CABLE_HINTS):
+                warnings.append(
+                    f"Your system's default playback device is \"{default_name}\", so apps like "
+                    "Discord play other people's voices into your virtual mic and they hear "
+                    "themselves. Set your speakers/headphones as the default playback device, "
+                    "and in Discord set Output Device to them too."
+                )
+        label = getattr(self, "loop_warning", None)
+        if label is None:
+            return
+        label.configure(text="\n".join(warnings))
+        if warnings:
+            label.pack(fill="x", padx=8, pady=(4, 0))
+        else:
+            label.pack_forget()
 
     def _restart_audio_engine(self):
         try:
