@@ -27,7 +27,8 @@ together, from one virtual microphone.
 - Volume sliders for the mic, the whole soundboard, and each sound, plus
   a limiter so loud moments get quieter instead of distorting
 - **Download** tab: grab audio from YouTube, TikTok, Instagram and other
-  sites (via yt-dlp) as MP3, straight into your board
+  sites (via yt-dlp) as MP3, straight into your board, with progress,
+  cancel, and optional start/end times
 - **Sound Editor** tab: trim a clip's start/end and boost or cut bass,
   with a waveform view and preview
 - All sounds live in one `Sounds/` folder
@@ -175,7 +176,11 @@ too; if so, leave it off.
   app shows a red warning when it detects either problem.
 - **Download tab:** paste a video/clip URL and click "Download as MP3".
   The audio is saved into `Sounds/` (the file name includes the video's
-  ID) and added to the board. Only download
+  ID) and added to the board. To keep only part of a long video, fill in
+  Start and/or End (e.g. `1:30`, `1:02:03` or `90`); the time range is
+  added to the file name. A progress bar shows the download, and Cancel
+  stops it and removes the partial file (conversion to MP3 can't be
+  cancelled). Live streams aren't supported. Only download
   content you have the right to use; downloading may be against the
   source site's terms of service. The tab shows the built-in downloader's
   version. Sites change often, so if downloads start failing, get the
