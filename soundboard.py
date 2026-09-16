@@ -12,9 +12,9 @@ import threading
 import tkinter as tk
 from tkinter import filedialog, messagebox, simpledialog
 
-import keyboard
 import sounddevice as sd
 import soundfile as sf
+from pynput import keyboard as pynkeyboard
 
 CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "soundboard_config.json")
 
@@ -36,7 +36,7 @@ class Soundboard:
         self.root = root
         self.root.title("Soundboard")
         self.config = load_config()
-        self.registered_hotkeys = []
+        self.hotkey_listener = None
 
         self._build_device_selector()
         self._build_sound_list()
@@ -133,7 +133,7 @@ class Soundboard:
         current = self.config["sounds"][index].get("hotkey") or ""
         hotkey = simpledialog.askstring(
             "Set hotkey",
-            "Enter hotkey (e.g. ctrl+alt+1), leave blank to clear:",
+            "Enter hotkey (e.g. <ctrl>+<alt>+1), leave blank to clear:",
             initialvalue=current,
         )
         if hotkey is None:
@@ -161,21 +161,22 @@ class Soundboard:
     # -- hotkeys --------------------------------------------------------
 
     def _apply_hotkeys(self):
-        for hk in self.registered_hotkeys:
-            try:
-                keyboard.remove_hotkey(hk)
-            except KeyError:
-                pass
-        self.registered_hotkeys = []
+        if self.hotkey_listener is not None:
+            self.hotkey_listener.stop()
+            self.hotkey_listener = None
 
+        mapping = {}
         for sound in self.config["sounds"]:
             hotkey = sound.get("hotkey")
             if hotkey:
-                try:
-                    handle = keyboard.add_hotkey(hotkey, lambda p=sound["path"]: self.play_sound(p))
-                    self.registered_hotkeys.append(handle)
-                except Exception as e:
-                    messagebox.showwarning("Hotkey error", f"Could not register '{hotkey}': {e}")
+                mapping[hotkey] = (lambda p=sound["path"]: self.play_sound(p))
+
+        if mapping:
+            try:
+                self.hotkey_listener = pynkeyboard.GlobalHotKeys(mapping)
+                self.hotkey_listener.start()
+            except Exception as e:
+                messagebox.showwarning("Hotkey error", f"Could not register hotkeys: {e}")
 
 
 def main():
