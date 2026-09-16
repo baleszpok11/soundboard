@@ -163,7 +163,9 @@ too; if so, leave it off.
   The audio is saved into `Sounds/` (the file name includes the video's
   ID) and added to the board. Only download
   content you have the right to use; downloading may be against the
-  source site's terms of service.
+  source site's terms of service. The tab shows the built-in downloader's
+  version. Sites change often, so if downloads start failing, get the
+  latest release (or run `pip install -U yt-dlp` when running from source).
 - **Sound Editor tab:** pick a sound (or browse for any file), drag the
   Start/End sliders to trim it (at least 0.05 s is kept), adjust Bass
   (-12 to +12 dB), click Preview to listen (Stop ends the preview), then
@@ -221,7 +223,10 @@ git tag v0.1.0
 git push origin v0.1.0
 ```
 
-See `.github/workflows/build.yml`. Note: the repo must be public (or the
+See `.github/workflows/build.yml`. Each release bundles the newest
+yt-dlp and notes its version; `.github/workflows/check-ytdlp.yml` runs
+weekly and opens an issue when a newer yt-dlp is out, as a reminder to
+publish a release. Note: the repo must be public (or the
 downloader needs read access) for others to reach the Releases page.
 
 ## Notes

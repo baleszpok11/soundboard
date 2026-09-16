@@ -63,4 +63,7 @@ others hear. Tabs: Soundboard, Download (yt-dlp to MP3), Sound Editor
 - Sounds/ — generated at runtime, holds all sound files (downloads, edits, imports)
 - Runtime data location: next to soundboard.py from source, next to the
   executable in Windows/Linux builds, ~/Documents/Soundboard in the macOS app
-- .github/workflows/build.yml — CI matrix build of Windows/macOS/Linux executables
+- .github/workflows/build.yml — CI matrix build of Windows/macOS/Linux executables;
+  release notes start with "Built with yt-dlp <version>"
+- .github/workflows/check-ytdlp.yml — weekly; opens an issue when PyPI has a
+  newer yt-dlp than the latest release

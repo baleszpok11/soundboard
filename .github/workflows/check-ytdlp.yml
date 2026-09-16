@@ -1,0 +1,42 @@
+name: Check for yt-dlp updates
+
+# Downloads break when sites change and the bundled yt-dlp is old. This
+# opens an issue when the latest release was built with an older yt-dlp,
+# so a new release (which bundles the newest yt-dlp) can be published.
+
+on:
+  schedule:
+    - cron: "0 8 * * 1"
+  workflow_dispatch: {}
+
+permissions:
+  issues: write
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Compare latest release with PyPI
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          latest=$(curl -fsSL https://pypi.org/pypi/yt-dlp/json | jq -r .info.version)
+          body=$(gh release view --repo "$REPO" --json body -q .body 2>/dev/null || true)
+          bundled=$(printf '%s\n' "$body" | sed -n 's/^Built with yt-dlp \([0-9.]*\).*/\1/p' | head -1)
+          echo "latest=$latest bundled=${bundled:-unknown}"
+          # PyPI drops leading zeros (2026.8.19); yt-dlp itself keeps them (2026.08.19).
+          norm() { echo "$1" | awk -F. -v OFS=. '{for (i = 1; i <= NF; i++) $i = $i + 0; print}'; }
+          if [ -n "$bundled" ] && [ "$(norm "$latest")" = "$(norm "$bundled")" ]; then
+            exit 0
+          fi
+          title="Downloader update: yt-dlp $latest is available"
+          existing=$(gh issue list --repo "$REPO" --state open --search "\"$title\" in:title" --json number -q '.[0].number')
+          if [ -n "$existing" ]; then
+            echo "Issue #$existing already open"
+            exit 0
+          fi
+          gh issue create --repo "$REPO" --title "$title" --body "The latest release bundles yt-dlp ${bundled:-(unknown version)}; yt-dlp $latest is out.
+
+          Sites change often, so older builds' downloads start failing. Publish a new release (tag master) to bundle the new version; CI installs the latest yt-dlp automatically."
