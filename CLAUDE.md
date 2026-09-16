@@ -4,6 +4,9 @@ Open-source cross-platform (Windows, macOS, Linux) soundboard in Python.
 Continuously mixes microphone input with triggered sound clips and sends
 the result to a chosen output device (virtual audio cable) so voice and
 sounds are picked up together as one microphone in Discord/games.
+Optionally mirrors sound clips (not the mic) to a separate local monitor
+device with its own mute toggle, so you can hear clips yourself without
+affecting what others hear.
 
 ## Stack
 - Python, CustomTkinter (GUI, orange/black theme)

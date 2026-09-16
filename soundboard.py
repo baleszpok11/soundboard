@@ -50,6 +50,8 @@ def load_config():
         config["output_device"] = config.pop("device")
     config.setdefault("output_device", None)
     config.setdefault("input_device", None)
+    config.setdefault("monitor_device", None)
+    config.setdefault("monitor_muted", False)
     config.setdefault("sounds", [])
     for sound in config["sounds"]:
         sound.setdefault("enabled", True)
@@ -102,16 +104,21 @@ class _ActiveSound:
 class AudioEngine:
     """Continuously mixes the selected microphone with triggered sound
     clips and writes the result to the selected output device, so voice
-    and soundboard clips are heard together on the virtual mic."""
+    and soundboard clips are heard together on the virtual mic. Can also
+    mirror sound clips (not the mic) to a separate local monitor device
+    so you can hear what's playing yourself, independently mutable."""
 
     def __init__(self):
         self._lock = threading.Lock()
         self.input_stream = None
         self.output_stream = None
+        self.monitor_stream = None
+        self.monitor_muted = False
         self._mic_buffer = collections.deque()
         self._active_sounds = []
+        self._active_sounds_monitor = []
 
-    def start(self, input_device, output_device):
+    def start(self, input_device, output_device, monitor_device):
         self.stop()
         if input_device is not None:
             self.input_stream = sd.InputStream(
@@ -133,9 +140,19 @@ class AudioEngine:
                 callback=self._on_output,
             )
             self.output_stream.start()
+        if monitor_device is not None:
+            self.monitor_stream = sd.OutputStream(
+                device=monitor_device,
+                channels=CHANNELS,
+                samplerate=SAMPLE_RATE,
+                blocksize=BLOCK_SIZE,
+                dtype="float32",
+                callback=self._on_monitor_output,
+            )
+            self.monitor_stream.start()
 
     def stop(self):
-        for attr in ("input_stream", "output_stream"):
+        for attr in ("input_stream", "output_stream", "monitor_stream"):
             stream = getattr(self, attr)
             if stream is not None:
                 stream.stop()
@@ -144,6 +161,13 @@ class AudioEngine:
         with self._lock:
             self._mic_buffer.clear()
             self._active_sounds = []
+            self._active_sounds_monitor = []
+
+    def set_monitor_muted(self, muted):
+        with self._lock:
+            self.monitor_muted = muted
+            if muted:
+                self._active_sounds_monitor = []
 
     def _on_input(self, indata, frames, time_info, status):
         with self._lock:
@@ -161,6 +185,19 @@ class AudioEngine:
                 if not finished:
                     still_active.append(sound)
             self._active_sounds = still_active
+        np.clip(mixed, -1.0, 1.0, out=mixed)
+        outdata[:] = mixed
+
+    def _on_monitor_output(self, outdata, frames, time_info, status):
+        with self._lock:
+            mixed = np.zeros((frames, CHANNELS), dtype=np.float32)
+            still_active = []
+            for sound in self._active_sounds_monitor:
+                chunk, finished = sound.read(frames)
+                mixed += chunk
+                if not finished:
+                    still_active.append(sound)
+            self._active_sounds_monitor = still_active
         np.clip(mixed, -1.0, 1.0, out=mixed)
         outdata[:] = mixed
 
@@ -186,6 +223,8 @@ class AudioEngine:
         data = _match_channels(data, CHANNELS)
         with self._lock:
             self._active_sounds.append(_ActiveSound(data))
+            if self.monitor_stream is not None and not self.monitor_muted:
+                self._active_sounds_monitor.append(_ActiveSound(data))
 
 
 class Soundboard:
@@ -286,6 +325,40 @@ class Soundboard:
         )
         self.output_menu.grid(row=1, column=1, sticky="ew", padx=8, pady=8)
 
+        ctk.CTkLabel(frame, text="Monitor (hear it yourself):", text_color=COLOR_TEXT).grid(
+            row=2, column=0, sticky="w", padx=8, pady=8
+        )
+        monitor_names = [name for _, name in self.output_devices]
+        current_monitor = self._name_for_index(self.output_devices, self.config.get("monitor_device"))
+        self.monitor_var = tk.StringVar(value=current_monitor if current_monitor in monitor_names else monitor_names[0])
+        self.monitor_menu = ctk.CTkOptionMenu(
+            frame,
+            variable=self.monitor_var,
+            values=monitor_names,
+            command=self._on_monitor_device_change,
+            fg_color=COLOR_ROW,
+            button_color=COLOR_ORANGE,
+            button_hover_color=COLOR_ORANGE_HOVER,
+            text_color=COLOR_TEXT,
+            dropdown_fg_color=COLOR_ROW,
+        )
+        self.monitor_menu.grid(row=2, column=1, sticky="ew", padx=8, pady=8)
+
+        self.mute_checkbox = ctk.CTkCheckBox(
+            frame,
+            text="Mute for me",
+            fg_color=COLOR_ORANGE,
+            hover_color=COLOR_ORANGE_HOVER,
+            checkmark_color=COLOR_BG,
+            text_color=COLOR_TEXT,
+        )
+        if self.config.get("monitor_muted", False):
+            self.mute_checkbox.select()
+        else:
+            self.mute_checkbox.deselect()
+        self.mute_checkbox.configure(command=self._on_toggle_mute)
+        self.mute_checkbox.grid(row=2, column=2, sticky="w", padx=8, pady=8)
+
     def _on_input_device_change(self, selected_name):
         self.config["input_device"] = self._index_for_name(self.input_devices, selected_name)
         save_config(self.config)
@@ -296,9 +369,25 @@ class Soundboard:
         save_config(self.config)
         self._restart_audio_engine()
 
+    def _on_monitor_device_change(self, selected_name):
+        self.config["monitor_device"] = self._index_for_name(self.output_devices, selected_name)
+        save_config(self.config)
+        self._restart_audio_engine()
+
+    def _on_toggle_mute(self):
+        muted = bool(self.mute_checkbox.get())
+        self.config["monitor_muted"] = muted
+        save_config(self.config)
+        self.audio_engine.set_monitor_muted(muted)
+
     def _restart_audio_engine(self):
         try:
-            self.audio_engine.start(self.config.get("input_device"), self.config.get("output_device"))
+            self.audio_engine.start(
+                self.config.get("input_device"),
+                self.config.get("output_device"),
+                self.config.get("monitor_device"),
+            )
+            self.audio_engine.set_monitor_muted(self.config.get("monitor_muted", False))
         except Exception as e:
             messagebox.showerror("Audio device error", str(e))
 

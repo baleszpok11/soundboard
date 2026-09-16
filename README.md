@@ -15,6 +15,9 @@ together, from one virtual microphone.
 - Mixes your real microphone with soundboard clips in real time, so
   people hear both at once — no separate mixer app needed
 - Choose which microphone (input) and which virtual cable (output) are used
+- Optionally hear sound clips yourself on a separate local monitor device
+  (e.g. your headphones), with its own "Mute for me" toggle — muting it
+  doesn't affect what others hear through the virtual cable
 - Settings persist automatically between runs
 - Runs from source (Python) or as a standalone executable — no Python
   required on the machine you run it on
@@ -75,6 +78,12 @@ virtual cable as your microphone in Discord/games.
 - **Virtual mic output:** the virtual cable that Discord/games should use
   as their microphone input. Pick `(none)` to disable a side if you don't
   need it (e.g. no mic passthrough).
+- **Monitor (hear it yourself):** optional; a local device (e.g. your
+  headphones) that also plays sound clips so you know what's being
+  triggered. Only sound clips are sent here, not your mic, to avoid
+  feedback/echo. Leave it on `(none)` to skip it entirely, or check
+  **Mute for me** to silence it without affecting what the virtual cable
+  sends to Discord/games.
 - "Add sound" to pick an audio file (wav, flac, ogg, mp3).
 - The checkbox next to each sound toggles it on/off — unchecked sounds
   keep their hotkey assignment but won't respond to it until re-enabled.
