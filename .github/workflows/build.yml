@@ -64,6 +64,16 @@ jobs:
           name: ${{ matrix.artifact }}
           path: ${{ matrix.artifact }}.zip
 
+      - name: Record yt-dlp version
+        if: runner.os == 'Linux'
+        run: python -c "import yt_dlp.version as v; print(v.__version__)" > ytdlp-version.txt
+
+      - uses: actions/upload-artifact@v4
+        if: runner.os == 'Linux'
+        with:
+          name: ytdlp-version
+          path: ytdlp-version.txt
+
   release:
     needs: build
     if: startsWith(github.ref, 'refs/tags/')
@@ -75,11 +85,18 @@ jobs:
         with:
           path: artifacts
 
+      - uses: actions/download-artifact@v4
+        with:
+          name: ytdlp-version
+          path: .
+
       - name: Create GitHub release with builds attached
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "${{ github.ref_name }}" artifacts/*/*.zip \
+          # check-ytdlp.yml reads this line to spot outdated downloaders.
+          gh release create "${{ github.ref_name }}" artifacts/soundboard-*/*.zip \
             --repo "${{ github.repository }}" \
             --title "${{ github.ref_name }}" \
+            --notes "Built with yt-dlp $(cat ytdlp-version.txt)" \
             --generate-notes

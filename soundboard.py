@@ -12,18 +12,22 @@ first run. Sound files live in the Sounds/ folder next to this script.
 """
 
 import collections
+import contextlib
+import datetime
 import filecmp
 import json
 import os
 import queue
 import re
 import shutil
+import subprocess
 import sys
 import tempfile
 import threading
 import time
 import tkinter as tk
 import traceback
+import webbrowser
 from tkinter import filedialog, messagebox
 
 import customtkinter as ctk
@@ -37,6 +41,7 @@ except OSError as e:
     PORTAUDIO_ERROR = e
 import soundfile as sf
 import yt_dlp
+import yt_dlp.version
 from pynput import keyboard as pynkeyboard
 from scipy.signal import lfilter
 
@@ -68,6 +73,8 @@ BASS_CUTOFF_HZ = 200.0
 MIN_CLIP_S = 0.05  # shortest clip the editor can trim to
 SAVE_PEAK = 0.99  # edited clips louder than full scale are scaled down to this
 EDITOR_PLACEHOLDER = "Choose a sound..."
+RELEASES_URL = "https://github.com/baleszpok11/soundboard/releases/latest"
+DOWNLOADER_STALE_DAYS = 60  # sites change often; older yt-dlp versions start failing
 EDITOR_PREVIEW_KEY = "editor-preview"
 VOLUME_MAX = 200  # percent
 CLIP_CACHE_BYTES = 512 * 1024 * 1024  # decoded clips kept in memory
@@ -110,6 +117,59 @@ def resolve_sound_path(path):
 def sanitize_filename(name):
     name = re.sub(r'[\\/:*?"<>|]', "_", name).strip()
     return name or "sound"
+
+
+def downloader_age_days():
+    """Days since the bundled yt-dlp was released (its version is a date),
+    or None if the version can't be parsed."""
+    try:
+        released = datetime.datetime.strptime(yt_dlp.version.__version__[:10], "%Y.%m.%d").date()
+    except ValueError:
+        return None
+    return (datetime.date.today() - released).days
+def hotkey_permission_granted():
+    """False when macOS will silently block global hotkeys because the app
+    has neither Input Monitoring nor Accessibility permission."""
+    if sys.platform != "darwin":
+        return True
+    try:
+        import HIServices
+        import Quartz
+        return bool(HIServices.AXIsProcessTrusted() or Quartz.CGPreflightListenEventAccess())
+    except Exception:
+        return True
+
+
+def request_hotkey_permission():
+    """Ask macOS to show its Input Monitoring prompt (only shown once)."""
+    try:
+        import Quartz
+        Quartz.CGRequestListenEventAccess()
+    except Exception:
+        pass
+
+
+def pin_macos_keyboard_layout():
+    """pynput reads the keyboard layout when its listener thread starts,
+    but current macOS only allows that on the main thread and kills the
+    process otherwise. Read it here (call from the main thread) and give
+    pynput the cached value."""
+    if sys.platform != "darwin":
+        return
+    from pynput._util import darwin as darwin_util
+    from pynput.keyboard import _darwin as darwin_keyboard
+
+    with darwin_util.keycode_context() as context:
+        pass
+
+    @contextlib.contextmanager
+    def cached_context():
+        yield context
+
+    darwin_keyboard.keycode_context = cached_context
+
+
+MACOS_INPUT_MONITORING_URL = "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent"
 
 
 def same_file(a, b):
@@ -838,6 +898,23 @@ class Soundboard:
         self.loop_warning = ctk.CTkLabel(
             warning_holder, text="", text_color=COLOR_ERROR, justify="left", anchor="w", wraplength=800,
         )
+        self.permission_warning = ctk.CTkFrame(warning_holder, fg_color=COLOR_BG)
+        ctk.CTkLabel(
+            self.permission_warning,
+            text=(
+                "macOS is blocking your hotkeys. Allow Soundboard (or your terminal, when running "
+                "from source) under Privacy & Security > Input Monitoring, then restart Soundboard."
+            ),
+            text_color=COLOR_ERROR, justify="left", anchor="w", wraplength=650,
+        ).pack(side="left", padx=(8, 8))
+        ctk.CTkButton(
+            self.permission_warning, text="Open settings", width=110,
+            command=lambda: subprocess.run(["open", MACOS_INPUT_MONITORING_URL]),
+            fg_color=COLOR_ROW, hover_color=COLOR_SURFACE, text_color=COLOR_ORANGE,
+            border_width=1, border_color=COLOR_ORANGE,
+        ).pack(side="left")
+        self._hotkeys_allowed = True
+        self._permission_requested = False
         self._build_sound_list(board_tab)
         self._build_controls(board_tab)
 
@@ -1274,6 +1351,7 @@ class Soundboard:
         self.dropout_label.configure(text=f"Audio dropouts: {count}" if count else "")
         self._watch_output()
         self._update_device_warnings()
+        self._update_hotkey_permission()
         self.root.after(1000, self._update_dropout_label)
 
     def _watch_output(self):
@@ -1480,10 +1558,32 @@ class Soundboard:
 
         if mapping:
             try:
+                pin_macos_keyboard_layout()
                 self.hotkey_listener = pynkeyboard.GlobalHotKeys(mapping)
                 self.hotkey_listener.start()
             except Exception as e:
                 messagebox.showwarning("Hotkey error", f"Could not register hotkeys: {e}")
+        if hasattr(self, "permission_warning"):
+            self._update_hotkey_permission()
+
+    def _update_hotkey_permission(self):
+        """Show the macOS permission warning while hotkeys are set but
+        blocked, and re-register them once permission is granted."""
+        if self.hotkey_listener is None:
+            allowed = True  # no hotkeys, nothing to warn about
+        else:
+            allowed = hotkey_permission_granted()
+        if allowed == self._hotkeys_allowed:
+            return
+        self._hotkeys_allowed = allowed
+        if allowed:
+            self.permission_warning.pack_forget()
+            self._apply_hotkeys()
+            return
+        self.permission_warning.pack(fill="x", pady=(4, 0))
+        if not self._permission_requested:
+            self._permission_requested = True
+            request_hotkey_permission()
 
     # -- download tab -------------------------------------------------------
 
@@ -1509,8 +1609,23 @@ class Soundboard:
         )
         self.download_button.pack(anchor="w", padx=8, pady=(0, 8))
 
-        self.download_status = ctk.CTkLabel(frame, text="", text_color=COLOR_TEXT, anchor="w")
+        self.download_status = ctk.CTkLabel(
+            frame, text="", text_color=COLOR_TEXT, anchor="w", justify="left", wraplength=800,
+        )
         self.download_status.pack(fill="x", padx=8, pady=(0, 8))
+        self.download_update_button = ctk.CTkButton(
+            frame, text="Open releases page", command=lambda: webbrowser.open(RELEASES_URL),
+            fg_color=COLOR_ROW, hover_color=COLOR_SURFACE, text_color=COLOR_ORANGE,
+            border_width=1, border_color=COLOR_ORANGE,
+        )
+
+        version_text = f"Downloader: yt-dlp {yt_dlp.version.__version__}"
+        age = downloader_age_days()
+        if age is not None and age > DOWNLOADER_STALE_DAYS:
+            version_text += f" ({age} days old; if downloads fail, {self._update_hint()})"
+        ctk.CTkLabel(
+            frame, text=version_text, text_color=COLOR_TEXT_DIM, anchor="w", justify="left", wraplength=800,
+        ).pack(fill="x", padx=8, pady=(0, 8))
 
         ctk.CTkLabel(
             parent,
@@ -1529,6 +1644,7 @@ class Soundboard:
         url = self.download_url_entry.get().strip()
         if not url:
             return
+        self.download_update_button.pack_forget()
         self.download_button.configure(state="disabled")
         self.download_status.configure(text="Downloading...", text_color=COLOR_TEXT)
         threading.Thread(target=self._download_worker, args=(url,), daemon=True).start()
@@ -1563,9 +1679,24 @@ class Soundboard:
             return
         self.root.after(0, lambda: self._on_download_done(final_path, title))
 
+    @staticmethod
+    def _update_hint():
+        if getattr(sys, "frozen", False):
+            return "get the latest Soundboard release"
+        return "run: pip install -U yt-dlp"
+
     def _on_download_error(self, message):
         self.download_button.configure(state="normal")
-        self.download_status.configure(text=f"Download failed: {message}", text_color=COLOR_ERROR)
+        self.download_status.configure(
+            text=(
+                f"Download failed: {message}\n\nIf the link works in your browser, the built-in "
+                f"downloader (yt-dlp {yt_dlp.version.__version__}) may be outdated, since sites "
+                f"change often. To update, {self._update_hint()}."
+            ),
+            text_color=COLOR_ERROR,
+        )
+        if getattr(sys, "frozen", False):
+            self.download_update_button.pack(anchor="w", padx=8, pady=(0, 8), after=self.download_status)
 
     def _on_download_done(self, path, title):
         self.download_button.configure(state="normal")
