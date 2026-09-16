@@ -74,17 +74,45 @@ open-source [VirtualAudioCable by frgnca](https://github.com/frgnca/VirtualAudio
 **macOS** — install [BlackHole](https://github.com/ExistentialAudio/BlackHole)
 (free, open-source).
 
-**Linux** — no install needed; PulseAudio/PipeWire can create a null sink:
+**Windows and macOS:** pick your real microphone as the **input** device
+and the virtual cable as the **output** device in Soundboard, then select
+the virtual cable as your microphone in Discord/games.
+
+**Linux** — no driver needed, but Soundboard needs the PortAudio library
+(the app tells you if it's missing):
+
+```
+sudo apt install libportaudio2      # Debian/Ubuntu
+sudo dnf install portaudio          # Fedora
+sudo pacman -S portaudio            # Arch
+```
+
+PulseAudio/PipeWire can create the virtual cable. The first command makes
+a "Soundboard" output; the second turns what's played into it into a
+"Soundboard_Mic" microphone that Discord/games can select:
 
 ```
 pactl load-module module-null-sink sink_name=soundboard sink_properties=device.description=Soundboard
+pactl load-module module-remap-source master=soundboard.monitor source_name=soundboard_mic source_properties=device.description=Soundboard_Mic
 ```
 
-(use `pavucontrol` for a GUI alternative to the CLI command above.)
+These last until you log out; add them to your PulseAudio/PipeWire
+startup config to keep them.
 
-In all three cases: pick your real microphone as the **input** device and
-the virtual cable as the **output** device in Soundboard, then select the
-virtual cable as your microphone in Discord/games.
+Soundboard can't list PulseAudio/PipeWire devices by name, so the routing
+is done in `pavucontrol` (install it from your package manager):
+
+1. In Soundboard, set both **Microphone** and **Virtual mic output** to
+   `pulse` (or `default` if there's no `pulse`).
+2. Play a sound. In pavucontrol's **Playback** tab, find Soundboard's
+   stream and switch it to **Soundboard**.
+3. In pavucontrol's **Recording** tab, switch Soundboard's stream to your
+   real microphone.
+4. In Discord/games, select **Soundboard_Mic** as your microphone.
+
+pavucontrol remembers these choices for next time. "Hear soundboard" may
+not work on Linux, because its stream can end up routed to Soundboard
+too; if so, leave it off.
 
 ## Usage
 

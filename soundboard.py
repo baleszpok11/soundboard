@@ -27,7 +27,12 @@ from tkinter import filedialog, messagebox
 import customtkinter as ctk
 import imageio_ffmpeg
 import numpy as np
-import sounddevice as sd
+try:
+    import sounddevice as sd
+except OSError as e:
+    # sounddevice bundles PortAudio only on Windows and macOS.
+    sd = None
+    PORTAUDIO_ERROR = e
 import soundfile as sf
 import yt_dlp
 from pynput import keyboard as pynkeyboard
@@ -1459,6 +1464,14 @@ def _fit_to_screen(root):
 def main():
     root = None
     try:
+        if sd is None:
+            raise RuntimeError(
+                f"The PortAudio library is missing ({PORTAUDIO_ERROR}).\n\n"
+                "Install it and start Soundboard again:\n"
+                "Debian/Ubuntu: sudo apt install libportaudio2\n"
+                "Fedora: sudo dnf install portaudio\n"
+                "Arch: sudo pacman -S portaudio"
+            )
         ctk.set_appearance_mode("dark")
         ctk.set_default_color_theme("dark-blue")
         root = ctk.CTk()

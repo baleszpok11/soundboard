@@ -21,6 +21,9 @@ others hear. Tabs: Soundboard, Download (yt-dlp to MP3), Sound Editor
   peak limiter (_Limiter) per output
 - Windows: device lists filtered to one host API (WASAPI with
   auto_convert, falling back to MME; choice saved as config "host_api")
+- Linux: sounddevice doesn't bundle PortAudio (libportaudio2); a missing
+  library is caught at import and shown as a startup error. PulseAudio
+  sinks aren't listed by name, so routing is done in pavucontrol
 - Errors: Tk callback errors and startup failures show a dialog and append
   to soundboard_error.log; config writes are atomic
 - JSON file for config (no database); devices stored by name, sounds by
