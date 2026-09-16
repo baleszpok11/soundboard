@@ -64,6 +64,10 @@ BLOCK_SIZE = 1024
 MIC_TARGET_FRAMES = SAMPLE_RATE // 10  # 100 ms cushion against uneven mic delivery
 MIC_MAX_FRAMES = SAMPLE_RATE // 2  # drop older mic audio beyond 500 ms
 BASS_CUTOFF_HZ = 200.0
+MIN_CLIP_S = 0.05  # shortest clip the editor can trim to
+SAVE_PEAK = 0.99  # edited clips louder than full scale are scaled down to this
+EDITOR_PLACEHOLDER = "Choose a sound..."
+EDITOR_PREVIEW_KEY = "editor-preview"
 VOLUME_MAX = 200  # percent
 CLIP_CACHE_BYTES = 512 * 1024 * 1024  # decoded clips kept in memory
 LIMITER_CEILING = 0.89  # about -1 dBFS
@@ -399,6 +403,11 @@ class AudioEngine:
             self._active_sounds = []
             self._active_sounds_monitor = []
 
+    def stop_key(self, key):
+        with self._lock:
+            self._active_sounds = [s for s in self._active_sounds if s.key != key]
+            self._active_sounds_monitor = [s for s in self._active_sounds_monitor if s.key != key]
+
     def set_monitor_muted(self, muted):
         with self._lock:
             self.monitor_muted = muted
@@ -588,6 +597,7 @@ class Soundboard:
 
         self.editor_path = None
         self.editor_data = None
+        self._editor_label = None
         self.editor_samplerate = None
         self._editor_sound_paths = {}
 
@@ -1334,11 +1344,11 @@ class Soundboard:
         top.grid_columnconfigure(1, weight=1)
 
         ctk.CTkLabel(top, text="Sound:", text_color=COLOR_TEXT).grid(row=0, column=0, sticky="w", padx=8, pady=8)
-        self.editor_sound_var = tk.StringVar(value="")
+        self.editor_sound_var = tk.StringVar(value=EDITOR_PLACEHOLDER)
         self.editor_sound_menu = ctk.CTkOptionMenu(
             top,
             variable=self.editor_sound_var,
-            values=[""],
+            values=[EDITOR_PLACEHOLDER],
             command=self._on_editor_sound_selected,
             fg_color=COLOR_ROW,
             button_color=COLOR_ORANGE,
@@ -1363,7 +1373,7 @@ class Soundboard:
 
         ctk.CTkLabel(trim_frame, text="Start:", text_color=COLOR_TEXT).grid(row=0, column=0, sticky="w", padx=8, pady=6)
         self.editor_start_slider = ctk.CTkSlider(
-            trim_frame, from_=0, to=1, command=self._on_trim_change,
+            trim_frame, from_=0, to=1, command=lambda v: self._on_trim_change(moved="start"),
             fg_color=COLOR_ROW, progress_color=COLOR_ORANGE,
             button_color=COLOR_ORANGE, button_hover_color=COLOR_ORANGE_HOVER,
         )
@@ -1374,7 +1384,7 @@ class Soundboard:
 
         ctk.CTkLabel(trim_frame, text="End:", text_color=COLOR_TEXT).grid(row=1, column=0, sticky="w", padx=8, pady=6)
         self.editor_end_slider = ctk.CTkSlider(
-            trim_frame, from_=0, to=1, command=self._on_trim_change,
+            trim_frame, from_=0, to=1, command=lambda v: self._on_trim_change(moved="end"),
             fg_color=COLOR_ROW, progress_color=COLOR_ORANGE,
             button_color=COLOR_ORANGE, button_hover_color=COLOR_ORANGE_HOVER,
         )
@@ -1396,15 +1406,23 @@ class Soundboard:
 
         buttons = ctk.CTkFrame(parent, fg_color=COLOR_BG)
         buttons.pack(fill="x", padx=4, pady=(4, 8))
-        ctk.CTkButton(
+        self.editor_preview_button = ctk.CTkButton(
             buttons, text="Preview", command=self._on_editor_preview,
-            fg_color=COLOR_ORANGE, hover_color=COLOR_ORANGE_HOVER, text_color=COLOR_BG,
-        ).pack(side="left", padx=(4, 4))
-        ctk.CTkButton(
+            hover_color=COLOR_ORANGE_HOVER, text_color=COLOR_BG, text_color_disabled=COLOR_TEXT_DIM,
+        )
+        self.editor_preview_button.pack(side="left", padx=(4, 4))
+        self.editor_stop_button = ctk.CTkButton(
+            buttons, text="Stop", command=lambda: self.audio_engine.stop_key(EDITOR_PREVIEW_KEY),
+            hover_color="#cc4444", text_color=COLOR_BG, text_color_disabled=COLOR_TEXT_DIM,
+        )
+        self.editor_stop_button.pack(side="left", padx=(4, 4))
+        self.editor_save_button = ctk.CTkButton(
             buttons, text="Save as new sound", command=self._on_editor_save,
             fg_color=COLOR_ROW, hover_color=COLOR_SURFACE, text_color=COLOR_ORANGE,
-            border_width=1, border_color=COLOR_ORANGE,
-        ).pack(side="left", padx=(4, 4))
+            text_color_disabled=COLOR_TEXT_DIM, border_width=1,
+        )
+        self.editor_save_button.pack(side="left", padx=(4, 4))
+        self._set_editor_enabled(False)
 
         self._refresh_editor_sound_list()
 
@@ -1417,16 +1435,16 @@ class Soundboard:
                 label = f"{label} ({sound['path']})"
             self._editor_sound_paths[label] = resolve_sound_path(sound["path"])
             names.append(label)
-        if not names:
-            names = [""]
-        self.editor_sound_menu.configure(values=names)
-        if self.editor_sound_var.get() not in names:
-            self.editor_sound_var.set(names[0])
+        self.editor_sound_menu.configure(values=names or [EDITOR_PLACEHOLDER])
+        # Keep showing what's loaded (it may be a browsed file that isn't on
+        # the board, or a sound that was just removed).
+        if self.editor_data is None:
+            self.editor_sound_var.set(EDITOR_PLACEHOLDER)
 
     def _on_editor_sound_selected(self, label):
         path = self._editor_sound_paths.get(label)
         if path:
-            self._load_editor_file(path)
+            self._load_editor_file(path, label)
 
     def _on_editor_browse(self):
         path = filedialog.askopenfilename(
@@ -1434,14 +1452,20 @@ class Soundboard:
             filetypes=[("Audio files", "*.wav *.flac *.ogg *.mp3"), ("All files", "*.*")],
         )
         if path:
-            self._load_editor_file(path)
+            self._load_editor_file(path, os.path.basename(path))
 
-    def _load_editor_file(self, path):
+    def _load_editor_file(self, path, label):
         try:
             data, samplerate = sf.read(path, dtype="float32", always_2d=True)
+            if len(data) == 0:
+                raise ValueError("The file contains no audio.")
         except Exception as e:
             messagebox.showerror("Could not load sound", str(e))
+            self.editor_sound_var.set(self._editor_label if self.editor_data is not None else EDITOR_PLACEHOLDER)
             return
+        self._editor_label = label
+        self.editor_sound_var.set(label)
+        self._set_editor_enabled(True)
         self.editor_path = path
         self.editor_data = data
         self.editor_samplerate = samplerate
@@ -1457,14 +1481,32 @@ class Soundboard:
         self.editor_bass_label.configure(text="+0 dB")
         self._draw_waveform()
 
-    def _on_trim_change(self, _value=None):
+    def _set_editor_enabled(self, enabled):
+        state = "normal" if enabled else "disabled"
+        accent = COLOR_ORANGE if enabled else COLOR_TEXT_DIM
+        for slider in (self.editor_start_slider, self.editor_end_slider, self.editor_bass_slider):
+            slider.configure(state=state, button_color=accent, progress_color=accent)
+        self.editor_preview_button.configure(state=state, fg_color=COLOR_ORANGE if enabled else COLOR_ROW)
+        self.editor_stop_button.configure(state=state, fg_color=COLOR_ERROR if enabled else COLOR_ROW)
+        self.editor_save_button.configure(state=state, border_color=COLOR_ORANGE if enabled else COLOR_TEXT_DIM)
+
+    def _on_trim_change(self, moved):
+        """Keep at least MIN_CLIP_S between the markers by pushing the
+        other marker, or holding the dragged one back at the file edge."""
         if self.editor_data is None:
             return
         duration = len(self.editor_data) / self.editor_samplerate
+        gap = min(MIN_CLIP_S, duration)
         start = self.editor_start_slider.get()
         end = self.editor_end_slider.get()
-        if end <= start:
-            end = min(start + 0.01, duration)
+        if end - start < gap:
+            if moved == "start":
+                start = min(start, duration - gap)
+                end = start + gap
+            else:
+                end = max(end, gap)
+                start = end - gap
+            self.editor_start_slider.set(start)
             self.editor_end_slider.set(end)
         self.editor_start_label.configure(text=f"{start:.2f}s")
         self.editor_end_label.configure(text=f"{end:.2f}s")
@@ -1478,12 +1520,16 @@ class Soundboard:
         _update_selection, which just moves the markers."""
         canvas = self.editor_canvas
         canvas.delete("all")
-        if self.editor_data is None or len(self._editor_mono) == 0:
-            return
         width = canvas.winfo_width()
         height = canvas.winfo_height()
         if width <= 1:
             width, height = 480, 140
+        if self.editor_data is None:
+            canvas.create_text(
+                width / 2, height / 2, fill=COLOR_TEXT_DIM,
+                text="Choose a sound above, or click Browse... to open any audio file.",
+            )
+            return
         canvas.create_rectangle(0, 0, 0, height, fill=COLOR_SURFACE, outline="", tags="selection")
 
         mono = self._editor_mono
@@ -1527,15 +1573,22 @@ class Soundboard:
         start_sample = int(start * self.editor_samplerate)
         end_sample = int(end * self.editor_samplerate)
         trimmed = self.editor_data[start_sample:end_sample]
+        if len(trimmed) == 0:
+            raise ValueError("The selected part is empty. Move the Start and End sliders apart.")
         gain_db = self.editor_bass_slider.get()
-        return apply_bass(trimmed, gain_db, self.editor_samplerate)
+        processed = apply_bass(trimmed, gain_db, self.editor_samplerate)
+        # WAV files hard-clip anything past full scale, so scale down instead.
+        peak = float(np.abs(processed).max())
+        if peak > 1.0:
+            processed = processed * (SAVE_PEAK / peak)
+        return processed
 
     def _on_editor_preview(self):
         if self.editor_data is None:
             return
         try:
             processed = self._get_editor_processed_data()
-            self.audio_engine.play_data(processed, self.editor_samplerate, key="editor-preview")
+            self.audio_engine.play_data(processed, self.editor_samplerate, key=EDITOR_PREVIEW_KEY)
         except Exception as e:
             messagebox.showerror("Preview error", str(e))
 
