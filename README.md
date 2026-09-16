@@ -135,8 +135,11 @@ too; if so, leave it off.
   into the `Sounds/` folder.
 - The checkbox next to each sound toggles it on/off — unchecked sounds
   keep their hotkey assignment but won't respond to it until re-enabled.
-- "Hotkey" to assign a global hotkey (e.g. `<ctrl>+<alt>+1`) that plays it
-  from anywhere, even while the app is unfocused.
+- "Hotkey" to assign a global hotkey that plays it from anywhere, even
+  while the app is unfocused. Press the key combination (e.g. Ctrl+Alt+1)
+  and click Save; Esc stops recording so you can type it instead (e.g.
+  `<ctrl>+<alt>+1`), and Clear removes it. Letter, number and symbol keys
+  need a modifier so they don't fire while you type.
 - "Play" to trigger a sound manually (works even if it's unchecked).
 - "Remove" takes a sound off the board and stops it if it's playing. For
   files in `Sounds/`, it asks whether to delete the file too.
