@@ -135,8 +135,11 @@ too; if so, leave it off.
   into the `Sounds/` folder.
 - The checkbox next to each sound toggles it on/off — unchecked sounds
   keep their hotkey assignment but won't respond to it until re-enabled.
-- "Hotkey" to assign a global hotkey (e.g. `<ctrl>+<alt>+1`) that plays it
-  from anywhere, even while the app is unfocused.
+- "Hotkey" to assign a global hotkey that plays it from anywhere, even
+  while the app is unfocused. Press the key combination (e.g. Ctrl+Alt+1)
+  and click Save; Esc stops recording so you can type it instead (e.g.
+  `<ctrl>+<alt>+1`), and Clear removes it. Letter, number and symbol keys
+  need a modifier so they don't fire while you type.
 - "Play" to trigger a sound manually (works even if it's unchecked).
 - "Remove" takes a sound off the board and stops it if it's playing. For
   files in `Sounds/`, it asks whether to delete the file too.
@@ -170,7 +173,9 @@ too; if so, leave it off.
   The audio is saved into `Sounds/` (the file name includes the video's
   ID) and added to the board. Only download
   content you have the right to use; downloading may be against the
-  source site's terms of service.
+  source site's terms of service. The tab shows the built-in downloader's
+  version. Sites change often, so if downloads start failing, get the
+  latest release (or run `pip install -U yt-dlp` when running from source).
 - **Sound Editor tab:** pick a sound (or browse for any file), drag the
   Start/End sliders to trim it (at least 0.05 s is kept), adjust Bass
   (-12 to +12 dB), click Preview to listen (Stop ends the preview), then
@@ -228,7 +233,10 @@ git tag v0.1.0
 git push origin v0.1.0
 ```
 
-See `.github/workflows/build.yml`. Note: the repo must be public (or the
+See `.github/workflows/build.yml`. Each release bundles the newest
+yt-dlp and notes its version; `.github/workflows/check-ytdlp.yml` runs
+weekly and opens an issue when a newer yt-dlp is out, as a reminder to
+publish a release. Note: the repo must be public (or the
 downloader needs read access) for others to reach the Releases page.
 
 ## Notes
@@ -246,8 +254,12 @@ downloader needs read access) for others to reach the Releases page.
   doesn't change your selection.
 - Global hotkeys are handled via `pynput`. On Linux with Wayland, global
   hotkey capture may not work depending on your compositor (X11 works).
-  On macOS, grant Accessibility permissions to your terminal/app when
-  prompted for hotkeys to register.
+  On macOS, hotkeys need Input Monitoring permission (System Settings >
+  Privacy & Security > Input Monitoring) for Soundboard, or for your
+  terminal when running from source. The app asks once and shows a
+  warning with an "Open settings" button while hotkeys are blocked;
+  restart Soundboard after allowing it. Because the macOS build isn't
+  notarized, each new version may need the permission granted again.
 - Sounds are stored in `soundboard_config.json` by filename, relative to
   `Sounds/`, so you can move the whole folder. Sounds added by older
   versions keep their absolute path; moving or renaming those files will

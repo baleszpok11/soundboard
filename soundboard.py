@@ -12,18 +12,22 @@ first run. Sound files live in the Sounds/ folder next to this script.
 """
 
 import collections
+import contextlib
+import datetime
 import filecmp
 import json
 import os
 import queue
 import re
 import shutil
+import subprocess
 import sys
 import tempfile
 import threading
 import time
 import tkinter as tk
 import traceback
+import webbrowser
 from tkinter import filedialog, messagebox
 
 import customtkinter as ctk
@@ -37,6 +41,7 @@ except OSError as e:
     PORTAUDIO_ERROR = e
 import soundfile as sf
 import yt_dlp
+import yt_dlp.version
 from pynput import keyboard as pynkeyboard
 from scipy.signal import lfilter
 
@@ -68,6 +73,8 @@ BASS_CUTOFF_HZ = 200.0
 MIN_CLIP_S = 0.05  # shortest clip the editor can trim to
 SAVE_PEAK = 0.99  # edited clips louder than full scale are scaled down to this
 EDITOR_PLACEHOLDER = "Choose a sound..."
+RELEASES_URL = "https://github.com/baleszpok11/soundboard/releases/latest"
+DOWNLOADER_STALE_DAYS = 60  # sites change often; older yt-dlp versions start failing
 EDITOR_PREVIEW_KEY = "editor-preview"
 VOLUME_MAX = 200  # percent
 CLIP_CACHE_BYTES = 512 * 1024 * 1024  # decoded clips kept in memory
@@ -110,6 +117,59 @@ def resolve_sound_path(path):
 def sanitize_filename(name):
     name = re.sub(r'[\\/:*?"<>|]', "_", name).strip()
     return name or "sound"
+
+
+def downloader_age_days():
+    """Days since the bundled yt-dlp was released (its version is a date),
+    or None if the version can't be parsed."""
+    try:
+        released = datetime.datetime.strptime(yt_dlp.version.__version__[:10], "%Y.%m.%d").date()
+    except ValueError:
+        return None
+    return (datetime.date.today() - released).days
+def hotkey_permission_granted():
+    """False when macOS will silently block global hotkeys because the app
+    has neither Input Monitoring nor Accessibility permission."""
+    if sys.platform != "darwin":
+        return True
+    try:
+        import HIServices
+        import Quartz
+        return bool(HIServices.AXIsProcessTrusted() or Quartz.CGPreflightListenEventAccess())
+    except Exception:
+        return True
+
+
+def request_hotkey_permission():
+    """Ask macOS to show its Input Monitoring prompt (only shown once)."""
+    try:
+        import Quartz
+        Quartz.CGRequestListenEventAccess()
+    except Exception:
+        pass
+
+
+def pin_macos_keyboard_layout():
+    """pynput reads the keyboard layout when its listener thread starts,
+    but current macOS only allows that on the main thread and kills the
+    process otherwise. Read it here (call from the main thread) and give
+    pynput the cached value."""
+    if sys.platform != "darwin":
+        return
+    from pynput._util import darwin as darwin_util
+    from pynput.keyboard import _darwin as darwin_keyboard
+
+    with darwin_util.keycode_context() as context:
+        pass
+
+    @contextlib.contextmanager
+    def cached_context():
+        yield context
+
+    darwin_keyboard.keycode_context = cached_context
+
+
+MACOS_INPUT_MONITORING_URL = "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent"
 
 
 def same_file(a, b):
@@ -584,6 +644,193 @@ class AudioEngine:
         return data
 
 
+# Tk keysym prefixes of modifier keys, mapped to pynput names.
+MODIFIER_KEYSYMS = {
+    "Control": "ctrl",
+    "Shift": "shift",
+    "Alt": "alt",
+    "Option": "alt",
+    "Command": "cmd",
+    "Super": "cmd",
+    "Win": "cmd",
+    # Meta is the Command key in Tk on macOS, and usually Alt elsewhere.
+    "Meta": "cmd" if sys.platform == "darwin" else "alt",
+}
+MODIFIER_ORDER = ("ctrl", "alt", "shift", "cmd")
+# Tk keysyms of non-character keys, mapped to pynput Key names.
+NAMED_KEYSYMS = {
+    "Return": "enter", "KP_Enter": "enter", "space": "space", "Tab": "tab",
+    "BackSpace": "backspace", "Delete": "delete", "Insert": "insert",
+    "Home": "home", "End": "end", "Prior": "page_up", "Next": "page_down",
+    "Up": "up", "Down": "down", "Left": "left", "Right": "right",
+    "Pause": "pause", "Print": "print_screen", "Scroll_Lock": "scroll_lock",
+    "Caps_Lock": "caps_lock", "Num_Lock": "num_lock", "Menu": "menu",
+}
+
+
+def modifier_for_keysym(keysym):
+    return MODIFIER_KEYSYMS.get(keysym.split("_")[0])
+
+
+def hotkey_part_for_key(keysym, keycode):
+    """The pynput hotkey part for a non-modifier key event, using the key's
+    unmodified character (Shift+1 gives "1", Option+1 on macOS gives "1").
+    Returns None for keys that can't be used."""
+    if keysym in NAMED_KEYSYMS:
+        return f"<{NAMED_KEYSYMS[keysym]}>"
+    if re.fullmatch(r"F([1-9]|1[0-9]|20)", keysym):
+        return f"<{keysym.lower()}>"
+    if keysym.startswith("KP_"):
+        return None  # numpad keys don't map to a stable character
+    char = None
+    try:
+        if sys.platform == "darwin":
+            # Tk on macOS puts the virtual key code in the top byte.
+            from pynput._util import darwin as darwin_util
+            with darwin_util.keycode_context() as context:
+                char = darwin_util.keycode_to_string(context, keycode >> 24)
+        elif sys.platform == "win32":
+            import ctypes
+            # MAPVK_VK_TO_CHAR; the high bit marks dead keys.
+            code = ctypes.windll.user32.MapVirtualKeyW(keycode, 2) & 0x7FFFFFFF
+            char = chr(code) if code else None
+    except Exception:
+        char = None
+    if not char and len(keysym) == 1:
+        char = keysym
+    if not char or len(char) != 1 or not char.isprintable() or char.isspace():
+        return None
+    return char.lower()
+
+
+class HotkeyDialog(ctk.CTkToplevel):
+    """Records a hotkey by pressing it, or lets it be typed. `result` is the
+    hotkey text, "" to clear, or None when cancelled."""
+
+    def __init__(self, parent, title, current):
+        super().__init__(parent)
+        self.title(title)
+        self.configure(fg_color=COLOR_SURFACE)
+        self.resizable(False, False)
+        self.result = None
+        self._held = set()
+        self._recording = False
+
+        self.prompt = ctk.CTkLabel(self, text="", text_color=COLOR_TEXT, justify="left")
+        self.prompt.pack(anchor="w", padx=16, pady=(16, 6))
+        self.entry = ctk.CTkEntry(
+            self, width=320, fg_color=COLOR_ROW, text_color=COLOR_TEXT, border_color=COLOR_ORANGE,
+        )
+        self.entry.pack(fill="x", padx=16)
+        if current:
+            self.entry.insert(0, current)
+        self.error = ctk.CTkLabel(self, text="", text_color=COLOR_ERROR, justify="left", wraplength=320)
+        self.error.pack(anchor="w", padx=16, pady=(4, 0))
+
+        buttons = ctk.CTkFrame(self, fg_color=COLOR_SURFACE)
+        buttons.pack(fill="x", padx=16, pady=(8, 16))
+        secondary = dict(
+            fg_color=COLOR_ROW, hover_color=COLOR_BG, text_color=COLOR_ORANGE,
+            border_width=1, border_color=COLOR_ORANGE, width=90,
+        )
+        self.record_button = ctk.CTkButton(buttons, text="Record again", command=self._start_recording, **secondary)
+        self.record_button.pack(side="left")
+        ctk.CTkButton(buttons, text="Clear", command=self._clear, **secondary).pack(side="left", padx=(6, 0))
+        ctk.CTkButton(buttons, text="Cancel", command=self.destroy, **secondary).pack(side="right")
+        ctk.CTkButton(
+            buttons, text="Save", width=90, command=self._save,
+            fg_color=COLOR_ORANGE, hover_color=COLOR_ORANGE_HOVER, text_color=COLOR_BG,
+        ).pack(side="right", padx=(0, 6))
+
+        self.bind("<KeyPress>", self._on_key_press)
+        self.bind("<KeyRelease>", self._on_key_release)
+        self.entry.bind("<FocusIn>", lambda e: self._stop_recording(restore=True))
+        self.entry.bind("<Return>", lambda e: self._save())
+        self.protocol("WM_DELETE_WINDOW", self.destroy)
+        self.transient(parent)
+        self.after(50, self._start_recording)
+
+    def _start_recording(self):
+        if not self._recording:
+            self._before = self.entry.get()
+        self._recording = True
+        self._held.clear()
+        self.error.configure(text="")
+        self.prompt.configure(
+            text="Press the key combination now (e.g. Ctrl+Alt+1).\nEsc stops recording; you can also type it below."
+        )
+        self.record_button.configure(state="disabled")
+        self.focus_force()
+        try:
+            self.grab_set()
+        except tk.TclError:
+            self.after(50, self._start_recording)  # not visible yet
+
+    def _stop_recording(self, restore=False):
+        if restore and self._recording:
+            self._show(self._before)  # drop a half-pressed combo
+        self._recording = False
+        self._held.clear()
+        self.prompt.configure(text="Hotkey (e.g. <ctrl>+<alt>+1). Leave empty to clear.")
+        self.record_button.configure(state="normal")
+
+    def _on_key_press(self, event):
+        if not self._recording:
+            return None
+        if event.keysym == "Escape":
+            self._stop_recording(restore=True)
+            return "break"
+        modifier = modifier_for_keysym(event.keysym)
+        if modifier:
+            self._held.add(modifier)
+            self._show(self._combo())
+            return "break"
+        # Shift and Control state bits are the same on every platform.
+        if event.state & 0x1:
+            self._held.add("shift")
+        if event.state & 0x4:
+            self._held.add("ctrl")
+        part = hotkey_part_for_key(event.keysym, event.keycode)
+        if part is None:
+            self.error.configure(text="That key can't be used in a hotkey. Try another one.")
+            return "break"
+        if not self._held and not part.startswith("<"):
+            self.error.configure(text="Add a modifier (Ctrl, Alt, ...) so the key doesn't fire while you type.")
+            return "break"
+        self._show(self._combo(part))
+        self.error.configure(text="")
+        self._stop_recording()
+        return "break"
+
+    def _on_key_release(self, event):
+        modifier = modifier_for_keysym(event.keysym)
+        if self._recording and modifier:
+            self._held.discard(modifier)
+            return "break"
+        return None
+
+    def _combo(self, key=None):
+        parts = [f"<{m}>" for m in MODIFIER_ORDER if m in self._held]
+        if key:
+            parts.append(key)
+        return "+".join(parts)
+
+    def _show(self, text):
+        self.entry.delete(0, "end")
+        self.entry.insert(0, text)
+
+    def _clear(self):
+        self._recording = False
+        self._stop_recording()
+        self._show("")
+
+    def _save(self):
+        self.result = self.entry.get().strip()
+        self.destroy()
+
+    def get(self):
+        self.wait_window()
+        return self.result
 class HotkeyListener(pynkeyboard.GlobalHotKeys):
     """GlobalHotKeys that also reports while a key combination is held
     (push-to-talk). on_hold(held) runs on the listener thread."""
@@ -692,6 +939,23 @@ class Soundboard:
         self.loop_warning = ctk.CTkLabel(
             warning_holder, text="", text_color=COLOR_ERROR, justify="left", anchor="w", wraplength=800,
         )
+        self.permission_warning = ctk.CTkFrame(warning_holder, fg_color=COLOR_BG)
+        ctk.CTkLabel(
+            self.permission_warning,
+            text=(
+                "macOS is blocking your hotkeys. Allow Soundboard (or your terminal, when running "
+                "from source) under Privacy & Security > Input Monitoring, then restart Soundboard."
+            ),
+            text_color=COLOR_ERROR, justify="left", anchor="w", wraplength=650,
+        ).pack(side="left", padx=(8, 8))
+        ctk.CTkButton(
+            self.permission_warning, text="Open settings", width=110,
+            command=lambda: subprocess.run(["open", MACOS_INPUT_MONITORING_URL]),
+            fg_color=COLOR_ROW, hover_color=COLOR_SURFACE, text_color=COLOR_ORANGE,
+            border_width=1, border_color=COLOR_ORANGE,
+        ).pack(side="left")
+        self._hotkeys_allowed = True
+        self._permission_requested = False
         self._build_sound_list(board_tab)
         self._build_controls(board_tab)
 
@@ -1230,6 +1494,7 @@ class Soundboard:
         self.dropout_label.configure(text=f"Audio dropouts: {count}" if count else "")
         self._watch_output()
         self._update_device_warnings()
+        self._update_hotkey_permission()
         self.root.after(1000, self._update_dropout_label)
 
     def _watch_output(self):
@@ -1358,14 +1623,16 @@ class Soundboard:
     def _ask_hotkey(self, title, current, owner):
         """Returns the new hotkey, "" to clear it, or None if cancelled or
         invalid. `owner` is the sound dict or "stop" being edited."""
-        dialog = ctk.CTkInputDialog(
-            text=f"Enter hotkey (e.g. <ctrl>+<alt>+1), leave blank to clear.\nCurrent: {current or 'none'}",
-            title=title,
-        )
-        hotkey = dialog.get_input()
+        # Pause global hotkeys so pressing an existing combo doesn't play it.
+        if self.hotkey_listener is not None:
+            self.hotkey_listener.stop()
+            self.hotkey_listener = None
+        try:
+            hotkey = HotkeyDialog(self.root, title, current).get()
+        finally:
+            self._apply_hotkeys()
         if hotkey is None:
             return None
-        hotkey = hotkey.strip()
         if not hotkey:
             return ""
         if not self._is_valid_hotkey(hotkey):
@@ -1445,12 +1712,34 @@ class Soundboard:
 
         if mapping or ptt_hotkey:
             try:
+                pin_macos_keyboard_layout()
                 self.hotkey_listener = HotkeyListener(mapping, ptt_hotkey, self._on_ptt_hold)
                 self.hotkey_listener.start()
             except Exception as e:
                 messagebox.showwarning("Hotkey error", f"Could not register hotkeys: {e}")
         if hasattr(self, "mic_status"):
             self._update_mic_state()
+        if hasattr(self, "permission_warning"):
+            self._update_hotkey_permission()
+
+    def _update_hotkey_permission(self):
+        """Show the macOS permission warning while hotkeys are set but
+        blocked, and re-register them once permission is granted."""
+        if self.hotkey_listener is None:
+            allowed = True  # no hotkeys, nothing to warn about
+        else:
+            allowed = hotkey_permission_granted()
+        if allowed == self._hotkeys_allowed:
+            return
+        self._hotkeys_allowed = allowed
+        if allowed:
+            self.permission_warning.pack_forget()
+            self._apply_hotkeys()
+            return
+        self.permission_warning.pack(fill="x", pady=(4, 0))
+        if not self._permission_requested:
+            self._permission_requested = True
+            request_hotkey_permission()
 
     # -- download tab -------------------------------------------------------
 
@@ -1476,8 +1765,23 @@ class Soundboard:
         )
         self.download_button.pack(anchor="w", padx=8, pady=(0, 8))
 
-        self.download_status = ctk.CTkLabel(frame, text="", text_color=COLOR_TEXT, anchor="w")
+        self.download_status = ctk.CTkLabel(
+            frame, text="", text_color=COLOR_TEXT, anchor="w", justify="left", wraplength=800,
+        )
         self.download_status.pack(fill="x", padx=8, pady=(0, 8))
+        self.download_update_button = ctk.CTkButton(
+            frame, text="Open releases page", command=lambda: webbrowser.open(RELEASES_URL),
+            fg_color=COLOR_ROW, hover_color=COLOR_SURFACE, text_color=COLOR_ORANGE,
+            border_width=1, border_color=COLOR_ORANGE,
+        )
+
+        version_text = f"Downloader: yt-dlp {yt_dlp.version.__version__}"
+        age = downloader_age_days()
+        if age is not None and age > DOWNLOADER_STALE_DAYS:
+            version_text += f" ({age} days old; if downloads fail, {self._update_hint()})"
+        ctk.CTkLabel(
+            frame, text=version_text, text_color=COLOR_TEXT_DIM, anchor="w", justify="left", wraplength=800,
+        ).pack(fill="x", padx=8, pady=(0, 8))
 
         ctk.CTkLabel(
             parent,
@@ -1496,6 +1800,7 @@ class Soundboard:
         url = self.download_url_entry.get().strip()
         if not url:
             return
+        self.download_update_button.pack_forget()
         self.download_button.configure(state="disabled")
         self.download_status.configure(text="Downloading...", text_color=COLOR_TEXT)
         threading.Thread(target=self._download_worker, args=(url,), daemon=True).start()
@@ -1530,9 +1835,24 @@ class Soundboard:
             return
         self.root.after(0, lambda: self._on_download_done(final_path, title))
 
+    @staticmethod
+    def _update_hint():
+        if getattr(sys, "frozen", False):
+            return "get the latest Soundboard release"
+        return "run: pip install -U yt-dlp"
+
     def _on_download_error(self, message):
         self.download_button.configure(state="normal")
-        self.download_status.configure(text=f"Download failed: {message}", text_color=COLOR_ERROR)
+        self.download_status.configure(
+            text=(
+                f"Download failed: {message}\n\nIf the link works in your browser, the built-in "
+                f"downloader (yt-dlp {yt_dlp.version.__version__}) may be outdated, since sites "
+                f"change often. To update, {self._update_hint()}."
+            ),
+            text_color=COLOR_ERROR,
+        )
+        if getattr(sys, "frozen", False):
+            self.download_update_button.pack(anchor="w", padx=8, pady=(0, 8), after=self.download_status)
 
     def _on_download_done(self, path, title):
         self.download_button.configure(state="normal")

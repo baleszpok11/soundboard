@@ -29,6 +29,10 @@ others hear. Tabs: Soundboard, Download (yt-dlp to MP3), Sound Editor
 - Devices: "Refresh devices" reinitializes PortAudio (sd._terminate /
   sd._initialize) to rescan. Streams with no callbacks for 2 s count as
   lost; a lost output is auto-reconnected every 5 s for 2 min
+- macOS hotkeys: pin_macos_keyboard_layout() reads the keyboard layout on
+  the main thread before starting pynput (pynput reads it on its listener
+  thread, which current macOS kills the process for). Missing Input
+  Monitoring/Accessibility permission is detected and shown as a warning
 - Errors: Tk callback errors and startup failures show a dialog and append
   to soundboard_error.log; config writes are atomic
 - JSON file for config (no database); devices stored by name, sounds by
@@ -65,4 +69,7 @@ others hear. Tabs: Soundboard, Download (yt-dlp to MP3), Sound Editor
 - Sounds/ — generated at runtime, holds all sound files (downloads, edits, imports)
 - Runtime data location: next to soundboard.py from source, next to the
   executable in Windows/Linux builds, ~/Documents/Soundboard in the macOS app
-- .github/workflows/build.yml — CI matrix build of Windows/macOS/Linux executables
+- .github/workflows/build.yml — CI matrix build of Windows/macOS/Linux executables;
+  release notes start with "Built with yt-dlp <version>"
+- .github/workflows/check-ytdlp.yml — weekly; opens an issue when PyPI has a
+  newer yt-dlp than the latest release
