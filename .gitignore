@@ -1,4 +1,8 @@
 soundboard_config.json
+Sounds/
 __pycache__/
 *.pyc
 .venv/
+build/
+dist/
+*.spec

@@ -1,4 +1,8 @@
+<img src="assets/icon.png" width="96" align="left" alt="Soundboard icon">
+
 # Soundboard
+
+<br clear="left">
 
 Open-source, cross-platform (Windows, macOS, Linux) soundboard. Continuously
 mixes your microphone with triggered sound clips and sends the combined
@@ -15,9 +19,9 @@ together, from one virtual microphone.
 - Mixes your real microphone with soundboard clips in real time, so
   people hear both at once — no separate mixer app needed
 - Choose which microphone (input) and which virtual cable (output) are used
-- Optionally hear sound clips yourself on a separate local monitor device
-  (e.g. your headphones), with its own "Mute for me" toggle — muting it
-  doesn't affect what others hear through the virtual cable
+- "Hear soundboard" toggle plays clips on your own speakers/headphones
+  too — turning it off doesn't affect what others hear through the
+  virtual cable
 - Settings persist automatically between runs
 - Runs from source (Python) or as a standalone executable — no Python
   required on the machine you run it on
@@ -78,12 +82,11 @@ virtual cable as your microphone in Discord/games.
 - **Virtual mic output:** the virtual cable that Discord/games should use
   as their microphone input. Pick `(none)` to disable a side if you don't
   need it (e.g. no mic passthrough).
-- **Monitor (hear it yourself):** optional; a local device (e.g. your
-  headphones) that also plays sound clips so you know what's being
-  triggered. Only sound clips are sent here, not your mic, to avoid
-  feedback/echo. Leave it on `(none)` to skip it entirely, or check
-  **Mute for me** to silence it without affecting what the virtual cable
-  sends to Discord/games.
+- **Hear soundboard:** when checked, clips also play on your system's
+  default output (your speakers/headphones) so you know what's being
+  triggered. Only clips are sent there, not your mic. If the virtual mic
+  output is itself your default output (e.g. no virtual cable installed),
+  you'll hear the main mix regardless of this setting.
 - "Add sound" to pick an audio file (wav, flac, ogg, mp3).
 - The checkbox next to each sound toggles it on/off — unchecked sounds
   keep their hotkey assignment but won't respond to it until re-enabled.
@@ -102,7 +105,15 @@ Install build dependencies and run PyInstaller:
 
 ```
 pip install -r build-requirements.txt
-pyinstaller --onefile --windowed soundboard.py
+
+# Windows
+pyinstaller --onefile --windowed --icon assets/icon.ico --add-data "assets/icon.png;assets" soundboard.py
+
+# macOS
+pyinstaller --onefile --windowed --icon assets/icon.icns --add-data "assets/icon.png:assets" soundboard.py
+
+# Linux
+pyinstaller --onefile --windowed --add-data "assets/icon.png:assets" soundboard.py
 ```
 
 The executable is written to `dist/`. Build on each target OS to get a

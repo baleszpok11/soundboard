@@ -3,3 +3,6 @@ soundfile
 pynput
 customtkinter
 numpy
+scipy
+yt-dlp
+imageio-ffmpeg

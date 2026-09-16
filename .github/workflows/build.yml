@@ -32,8 +32,17 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt -r build-requirements.txt
 
-      - name: Build executable
-        run: pyinstaller --onefile --windowed soundboard.py
+      - name: Build executable (Windows)
+        if: runner.os == 'Windows'
+        run: pyinstaller --onefile --windowed --icon assets/icon.ico --add-data "assets/icon.png;assets" soundboard.py
+
+      - name: Build executable (macOS)
+        if: runner.os == 'macOS'
+        run: pyinstaller --onefile --windowed --icon assets/icon.icns --add-data "assets/icon.png:assets" soundboard.py
+
+      - name: Build executable (Linux)
+        if: runner.os == 'Linux'
+        run: pyinstaller --onefile --windowed --add-data "assets/icon.png:assets" soundboard.py
 
       - name: Package (Windows)
         if: runner.os == 'Windows'

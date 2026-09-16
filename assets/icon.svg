@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <rect x="0" y="0" width="512" height="512" rx="112" ry="112" fill="#121212"/>
+
+  <!-- sound waves, left -->
+  <path d="M 176 166 A 40 40 0 0 0 176 246" fill="none" stroke="#ff8c00" stroke-width="14" stroke-linecap="round"/>
+  <path d="M 150 136 A 70 70 0 0 0 150 276" fill="none" stroke="#ff8c00" stroke-width="14" stroke-linecap="round"/>
+  <path d="M 124 106 A 100 100 0 0 0 124 306" fill="none" stroke="#ff8c00" stroke-width="14" stroke-linecap="round"/>
+
+  <!-- sound waves, right (mirrored) -->
+  <path d="M 336 166 A 40 40 0 0 1 336 246" fill="none" stroke="#ff8c00" stroke-width="14" stroke-linecap="round"/>
+  <path d="M 362 136 A 70 70 0 0 1 362 276" fill="none" stroke="#ff8c00" stroke-width="14" stroke-linecap="round"/>
+  <path d="M 388 106 A 100 100 0 0 1 388 306" fill="none" stroke="#ff8c00" stroke-width="14" stroke-linecap="round"/>
+
+  <!-- mic capsule -->
+  <rect x="226" y="150" width="60" height="112" rx="30" ry="30" fill="#f2f2f2"/>
+  <!-- grille lines -->
+  <rect x="233" y="178" width="46" height="6" rx="3" fill="#121212"/>
+  <rect x="233" y="200" width="46" height="6" rx="3" fill="#121212"/>
+  <rect x="233" y="222" width="46" height="6" rx="3" fill="#121212"/>
+
+  <!-- mic stand -->
+  <path d="M 206 246 v 14 a 50 55 0 0 0 100 0 v -14" fill="none" stroke="#ff8c00" stroke-width="14" stroke-linecap="round"/>
+  <line x1="256" y1="315" x2="256" y2="352" stroke="#ff8c00" stroke-width="14" stroke-linecap="round"/>
+  <line x1="216" y1="352" x2="296" y2="352" stroke="#ff8c00" stroke-width="14" stroke-linecap="round"/>
+</svg>
