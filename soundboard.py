@@ -1445,6 +1445,7 @@ class Soundboard:
         self.editor_path = path
         self.editor_data = data
         self.editor_samplerate = samplerate
+        self._editor_mono = data.mean(axis=1)
         duration = len(data) / samplerate
         self.editor_start_slider.configure(from_=0, to=duration)
         self.editor_end_slider.configure(from_=0, to=duration)
@@ -1467,40 +1468,58 @@ class Soundboard:
             self.editor_end_slider.set(end)
         self.editor_start_label.configure(text=f"{start:.2f}s")
         self.editor_end_label.configure(text=f"{end:.2f}s")
-        self._draw_waveform()
+        self._update_selection()
 
     def _on_bass_change(self, value):
         self.editor_bass_label.configure(text=f"{value:+.0f} dB")
 
     def _draw_waveform(self):
+        """Full redraw, only on load and resize. Slider moves use
+        _update_selection, which just moves the markers."""
         canvas = self.editor_canvas
         canvas.delete("all")
-        if self.editor_data is None:
+        if self.editor_data is None or len(self._editor_mono) == 0:
             return
-        width = canvas.winfo_width() or 480
-        height = canvas.winfo_height() or 140
-        mono = self.editor_data.mean(axis=1)
-        n = len(mono)
-        if n == 0 or width <= 0:
-            return
-        duration = n / self.editor_samplerate
-        start = self.editor_start_slider.get()
-        end = self.editor_end_slider.get()
-        start_x = (start / duration) * width if duration else 0
-        end_x = (end / duration) * width if duration else width
-        canvas.create_rectangle(start_x, 0, end_x, height, fill=COLOR_SURFACE, outline="")
+        width = canvas.winfo_width()
+        height = canvas.winfo_height()
+        if width <= 1:
+            width, height = 480, 140
+        canvas.create_rectangle(0, 0, 0, height, fill=COLOR_SURFACE, outline="", tags="selection")
 
-        step = max(1, n // width)
+        mono = self._editor_mono
+        columns = min(width, len(mono))
+        edges = np.linspace(0, len(mono), columns + 1).astype(int)[:-1]
+        highs = np.maximum.reduceat(mono, edges)
+        lows = np.minimum.reduceat(mono, edges)
         mid = height / 2
-        for x in range(width):
-            chunk = mono[x * step: x * step + step]
-            if len(chunk) == 0:
-                continue
-            lo, hi = float(chunk.min()), float(chunk.max())
-            canvas.create_line(x, mid - hi * mid, x, mid - lo * mid, fill=COLOR_ORANGE)
+        xs = np.linspace(0, width - 1, columns)
+        # One polygon: the top edge left to right, then the bottom edge back.
+        top = np.column_stack((xs, mid - np.clip(highs, -1, 1) * mid))
+        bottom = np.column_stack((xs[::-1], mid - np.clip(lows[::-1], -1, 1) * mid))
+        points = np.concatenate((top, bottom)).ravel().tolist()
+        if columns == 1:
+            canvas.create_line(0, points[1], 0, points[3], fill=COLOR_ORANGE)
+        else:
+            canvas.create_polygon(points, fill=COLOR_ORANGE, outline=COLOR_ORANGE)
 
-        canvas.create_line(start_x, 0, start_x, height, fill=COLOR_TEXT)
-        canvas.create_line(end_x, 0, end_x, height, fill=COLOR_TEXT)
+        canvas.create_line(0, 0, 0, height, fill=COLOR_TEXT, tags="start_marker")
+        canvas.create_line(0, 0, 0, height, fill=COLOR_TEXT, tags="end_marker")
+        self._update_selection()
+
+    def _update_selection(self):
+        canvas = self.editor_canvas
+        if self.editor_data is None or not canvas.find_withtag("selection"):
+            return
+        width = canvas.winfo_width()
+        height = canvas.winfo_height()
+        if width <= 1:
+            width, height = 480, 140
+        duration = len(self.editor_data) / self.editor_samplerate
+        start_x = self.editor_start_slider.get() / duration * width if duration else 0
+        end_x = self.editor_end_slider.get() / duration * width if duration else width
+        canvas.coords("selection", start_x, 0, end_x, height)
+        canvas.coords("start_marker", start_x, 0, start_x, height)
+        canvas.coords("end_marker", end_x, 0, end_x, height)
 
     def _get_editor_processed_data(self):
         start = self.editor_start_slider.get()
