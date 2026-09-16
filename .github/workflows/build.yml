@@ -39,7 +39,9 @@ jobs:
       - name: Build executable (macOS)
         if: runner.os == 'macOS'
         run: |
-          pyinstaller --onefile --windowed --icon assets/icon.icns --add-data "assets/icon.png:assets" --collect-data customtkinter --collect-all yt_dlp --collect-all imageio_ffmpeg soundboard.py
+          # A .app must be onedir; onefile .apps don't open reliably and can't be
+          # granted Input Monitoring.
+          pyinstaller --onedir --windowed --icon assets/icon.icns --add-data "assets/icon.png:assets" --collect-data customtkinter --collect-all yt_dlp --collect-all imageio_ffmpeg soundboard.py
           plutil -insert NSMicrophoneUsageDescription -string "Soundboard mixes your microphone with sound clips and sends them to your virtual audio cable." dist/soundboard.app/Contents/Info.plist
           codesign --force --deep -s - dist/soundboard.app
 
@@ -53,7 +55,8 @@ jobs:
 
       - name: Package (macOS)
         if: runner.os == 'macOS'
-        run: cd dist && zip -r ../${{ matrix.artifact }}.zip soundboard.app
+        # ditto keeps the bundle's symlinks; zip -r copies them and breaks the signature.
+        run: ditto -c -k --keepParent dist/soundboard.app ${{ matrix.artifact }}.zip
 
       - name: Package (Linux)
         if: runner.os == 'Linux'
