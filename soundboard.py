@@ -20,6 +20,7 @@ import shutil
 import sys
 import tempfile
 import threading
+import time
 import tkinter as tk
 import traceback
 from tkinter import filedialog, messagebox
@@ -69,6 +70,9 @@ LIMITER_CEILING = 0.89  # about -1 dBFS
 LIMITER_RELEASE_S = 0.3
 
 NO_DEVICE_LABEL = "(none)"
+STREAM_TIMEOUT_S = 2.0  # a running stream with no callbacks for this long is treated as lost
+RECONNECT_INTERVAL_S = 5.0
+RECONNECT_WINDOW_S = 120.0
 # On Windows every device is listed once per host API; show one API only.
 # WASAPI has full names and lower latency; MME is the fallback.
 WINDOWS_HOSTAPIS = ("Windows WASAPI", "MME")
@@ -287,6 +291,8 @@ class AudioEngine:
         self._output_limiter = _Limiter()
         self._monitor_limiter = _Limiter()
         self.on_error = None
+        self._started_at = 0.0
+        self._last_callback = {}
         self._clip_cache = collections.OrderedDict()
         self._clip_cache_bytes = 0
         self._cache_lock = threading.Lock()
@@ -312,6 +318,8 @@ class AudioEngine:
 
     def start(self, input_device, output_device, monitor_device):
         self.stop()
+        self._started_at = time.monotonic()
+        self._last_callback = {}
         if input_device is not None:
             self.input_channels = self._device_channels(input_device, output=False)
             self.input_stream = sd.InputStream(
@@ -356,8 +364,11 @@ class AudioEngine:
         for attr in ("input_stream", "output_stream", "monitor_stream"):
             stream = getattr(self, attr)
             if stream is not None:
-                stream.stop()
-                stream.close()
+                try:
+                    stream.stop()
+                    stream.close()
+                except Exception:
+                    pass  # the device may already be gone
                 setattr(self, attr, None)
         with self._lock:
             self._mic_buffer.clear()
@@ -368,6 +379,20 @@ class AudioEngine:
             self.dropouts = 0
             self._output_limiter = _Limiter()
             self._monitor_limiter = _Limiter()
+
+    def lost_streams(self):
+        """Names ("input", "output") of open streams that have stopped
+        or stopped calling back, e.g. because the device was unplugged."""
+        now = time.monotonic()
+        lost = []
+        for name in ("input", "output"):
+            stream = getattr(self, f"{name}_stream")
+            if stream is None:
+                continue
+            last = self._last_callback.get(name, self._started_at)
+            if not stream.active or now - last > STREAM_TIMEOUT_S:
+                lost.append(name)
+        return lost
 
     def stop_all(self):
         with self._lock:
@@ -381,6 +406,7 @@ class AudioEngine:
                 self._active_sounds_monitor = []
 
     def _on_input(self, indata, frames, time_info, status):
+        self._last_callback["input"] = time.monotonic()
         with self._lock:
             if status:
                 self.dropouts += 1
@@ -390,6 +416,7 @@ class AudioEngine:
                 self._mic_frames -= len(self._mic_buffer.popleft())
 
     def _on_output(self, outdata, frames, time_info, status):
+        self._last_callback["output"] = time.monotonic()
         with self._lock:
             if status:
                 self.dropouts += 1
@@ -555,6 +582,9 @@ class Soundboard:
         self.audio_engine.on_error = self._on_playback_error
         self.hotkey_listener = None
         self._pending_save = None
+        self._output_was_up = False
+        self._output_down_since = None
+        self._next_reconnect = 0.0
 
         self.editor_path = None
         self.editor_data = None
@@ -699,7 +729,7 @@ class Soundboard:
         )
         input_names = [name for _, name in self.input_devices]
         current_input = self.config.get("input_device")
-        self.input_var = tk.StringVar(value=current_input if current_input in input_names else NO_DEVICE_LABEL)
+        self.input_var = tk.StringVar(value=current_input or NO_DEVICE_LABEL)
         self.input_menu = ctk.CTkOptionMenu(
             frame,
             variable=self.input_var,
@@ -712,13 +742,18 @@ class Soundboard:
             dropdown_fg_color=COLOR_ROW,
         )
         self.input_menu.grid(row=0, column=1, sticky="ew", padx=8, pady=8)
+        ctk.CTkButton(
+            frame, text="Refresh devices", command=self.refresh_devices,
+            fg_color=COLOR_ROW, hover_color=COLOR_SURFACE, text_color=COLOR_ORANGE,
+            border_width=1, border_color=COLOR_ORANGE,
+        ).grid(row=0, column=2, sticky="w", padx=8, pady=8)
 
         ctk.CTkLabel(frame, text="Virtual mic output:", text_color=COLOR_TEXT).grid(
             row=1, column=0, sticky="w", padx=8, pady=8
         )
         output_names = [name for _, name in self.output_devices]
         current_output = self.config.get("output_device")
-        self.output_var = tk.StringVar(value=current_output if current_output in output_names else NO_DEVICE_LABEL)
+        self.output_var = tk.StringVar(value=current_output or NO_DEVICE_LABEL)
         self.output_menu = ctk.CTkOptionMenu(
             frame,
             variable=self.output_var,
@@ -787,8 +822,7 @@ class Soundboard:
         ):
             names = [name for _, name in devices]
             menu.configure(values=names)
-            current = self.config.get(key)
-            var.set(current if current in names else NO_DEVICE_LABEL)
+            var.set(self.config.get(key) or NO_DEVICE_LABEL)
 
     def _on_input_device_change(self, selected_name):
         self.config["input_device"] = None if selected_name == NO_DEVICE_LABEL else selected_name
@@ -818,12 +852,24 @@ class Soundboard:
         self.audio_engine.sound_gain = self.config["sound_volume"] / 100
         self.audio_engine.start(input_device, output_device, monitor_device)
         self.audio_engine.set_monitor_muted(not self.config.get("hear_self", True))
-        self._update_loop_warning(input_device, output_device)
+        self._update_device_warnings()
 
-    def _update_loop_warning(self, input_device, output_device):
-        """Warn about setups that send PC audio (e.g. other people's voices
-        from Discord) into the virtual mic, so they hear themselves."""
+    def _update_device_warnings(self):
+        """Show disconnected devices, and setups that send PC audio (e.g.
+        other people's voices from Discord) into the virtual mic, so they
+        hear themselves."""
+        input_device = self._index_for_name(self.input_devices, self.config.get("input_device"))
+        output_device = self._index_for_name(self.output_devices, self.config.get("output_device"))
         warnings = []
+        lost = self.audio_engine.lost_streams()
+        for key, label, index in (("input_device", "Microphone", input_device), ("output_device", "Virtual mic output", output_device)):
+            name = self.config.get(key)
+            if name and index is None:
+                warnings.append(f"{label} \"{name}\" isn't connected. Plug it in and click Refresh devices, or pick another device.")
+            elif key.split("_")[0] in lost:
+                warnings.append(f"{label} \"{name}\" stopped responding. Click Refresh devices.")
+        if self._output_down_since is not None and time.monotonic() - self._output_down_since <= RECONNECT_WINDOW_S:
+            warnings.append("Trying to reconnect the virtual mic output...")
         input_name = self.config.get("input_device") or ""
         if input_device is not None and any(h in input_name.lower() for h in LOOPBACK_INPUT_HINTS):
             warnings.append(
@@ -843,13 +889,33 @@ class Soundboard:
         label = getattr(self, "loop_warning", None)
         if label is None:
             return
-        label.configure(text="\n".join(warnings))
+        text = "\n".join(warnings)
+        if label.cget("text") == text:
+            return
+        label.configure(text=text)
         if warnings:
             label.pack(fill="x", padx=8, pady=(4, 0))
         else:
             label.pack_forget()
 
-    def _restart_audio_engine(self):
+    def refresh_devices(self, show_errors=True):
+        """Re-read the system's device list (PortAudio only scans it at
+        startup) and reopen the selected devices."""
+        self.audio_engine.stop()
+        try:
+            sd._terminate()
+            sd._initialize()
+        except Exception as e:
+            if show_errors:
+                messagebox.showerror("Audio device error", f"Could not rescan audio devices: {e}")
+            return
+        self.hostapi = self._pick_hostapi(self.config.get("host_api"))
+        self.input_devices = self._list_devices(output=False)
+        self.output_devices = self._list_devices(output=True)
+        self._refresh_device_menus()
+        self._restart_audio_engine(show_errors)
+
+    def _restart_audio_engine(self, show_errors=True):
         try:
             self._start_audio_engine()
             return
@@ -862,7 +928,9 @@ class Soundboard:
                 return
             except Exception as e:
                 error = e
-        messagebox.showerror("Audio device error", str(error))
+        if show_errors:
+            messagebox.showerror("Audio device error", str(error))
+        self._update_device_warnings()
 
     def _fallback_to_mme(self):
         """If a WASAPI device failed to open, switch the device lists to
@@ -999,7 +1067,32 @@ class Soundboard:
     def _update_dropout_label(self):
         count = self.audio_engine.dropouts
         self.dropout_label.configure(text=f"Audio dropouts: {count}" if count else "")
+        self._watch_output()
+        self._update_device_warnings()
         self.root.after(1000, self._update_dropout_label)
+
+    def _watch_output(self):
+        """Reconnect automatically when the virtual mic output is lost
+        mid-session. Rescanning restarts every stream, which is harmless
+        while the output is down anyway, so it's only done then."""
+        engine = self.audio_engine
+        down = bool(self.config.get("output_device")) and (
+            engine.output_stream is None or "output" in engine.lost_streams()
+        )
+        now = time.monotonic()
+        if not down:
+            self._output_down_since = None
+            self._output_was_up = engine.output_stream is not None
+            return
+        if self._output_down_since is None:
+            if not self._output_was_up:
+                return
+            self._output_was_up = False
+            self._output_down_since = now
+            self._next_reconnect = now
+        if now >= self._next_reconnect and now - self._output_down_since <= RECONNECT_WINDOW_S:
+            self._next_reconnect = now + RECONNECT_INTERVAL_S
+            self.refresh_devices(show_errors=False)
 
     # -- sound management -------------------------------------------------
 

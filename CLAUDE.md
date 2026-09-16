@@ -24,6 +24,9 @@ others hear. Tabs: Soundboard, Download (yt-dlp to MP3), Sound Editor
 - Linux: sounddevice doesn't bundle PortAudio (libportaudio2); a missing
   library is caught at import and shown as a startup error. PulseAudio
   sinks aren't listed by name, so routing is done in pavucontrol
+- Devices: "Refresh devices" reinitializes PortAudio (sd._terminate /
+  sd._initialize) to rescan. Streams with no callbacks for 2 s count as
+  lost; a lost output is auto-reconnected every 5 s for 2 min
 - Errors: Tk callback errors and startup failures show a dialog and append
   to soundboard_error.log; config writes are atomic
 - JSON file for config (no database); devices stored by name, sounds by

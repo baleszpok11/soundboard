@@ -121,6 +121,11 @@ too; if so, leave it off.
 - **Virtual mic output:** the virtual cable that Discord/games should use
   as their microphone input. Pick `(none)` to disable a side if you don't
   need it (e.g. no mic passthrough).
+- **Refresh devices:** rescans your audio devices, e.g. after plugging in
+  a headset or installing a virtual cable, without restarting the app.
+  A selected device that isn't connected is shown in red. If the virtual
+  mic output disconnects while you're using it, the app tries to
+  reconnect it for 2 minutes.
 - **Hear soundboard:** when checked, clips also play on your system's
   default output (your speakers/headphones) so you know what's being
   triggered. Only clips are sent there, not your mic. If the virtual mic
