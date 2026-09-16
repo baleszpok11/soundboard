@@ -239,8 +239,12 @@ downloader needs read access) for others to reach the Releases page.
   doesn't change your selection.
 - Global hotkeys are handled via `pynput`. On Linux with Wayland, global
   hotkey capture may not work depending on your compositor (X11 works).
-  On macOS, grant Accessibility permissions to your terminal/app when
-  prompted for hotkeys to register.
+  On macOS, hotkeys need Input Monitoring permission (System Settings >
+  Privacy & Security > Input Monitoring) for Soundboard, or for your
+  terminal when running from source. The app asks once and shows a
+  warning with an "Open settings" button while hotkeys are blocked;
+  restart Soundboard after allowing it. Because the macOS build isn't
+  notarized, each new version may need the permission granted again.
 - Sounds are stored in `soundboard_config.json` by filename, relative to
   `Sounds/`, so you can move the whole folder. Sounds added by older
   versions keep their absolute path; moving or renaming those files will
