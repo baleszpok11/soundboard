@@ -14,6 +14,7 @@ first run. Sound files live in the Sounds/ folder next to this script.
 import collections
 import json
 import os
+import queue
 import re
 import shutil
 import sys
@@ -58,6 +59,7 @@ MIC_TARGET_FRAMES = SAMPLE_RATE // 10  # 100 ms cushion against uneven mic deliv
 MIC_MAX_FRAMES = SAMPLE_RATE // 2  # drop older mic audio beyond 500 ms
 BASS_CUTOFF_HZ = 200.0
 VOLUME_MAX = 200  # percent
+CLIP_CACHE_BYTES = 512 * 1024 * 1024  # decoded clips kept in memory
 LIMITER_CEILING = 0.89  # about -1 dBFS
 LIMITER_RELEASE_S = 0.3
 
@@ -277,6 +279,14 @@ class AudioEngine:
         self.sound_gain = 1.0
         self._output_limiter = _Limiter()
         self._monitor_limiter = _Limiter()
+        self.on_error = None
+        self._clip_cache = collections.OrderedDict()
+        self._clip_cache_bytes = 0
+        self._cache_lock = threading.Lock()
+        # Decoding runs here, not in the caller: pynput's keyboard hook
+        # blocks every keypress on the system until its callback returns.
+        self._requests = queue.Queue()
+        threading.Thread(target=self._worker, daemon=True).start()
 
     @staticmethod
     def _device_channels(device, output):
@@ -447,21 +457,69 @@ class AudioEngine:
         still playing is stopped first, so re-triggering restarts it."""
         if self.output_stream is None and self.monitor_stream is None:
             raise RuntimeError("No output device selected.")
-        resampled = _resample(data, samplerate, SAMPLE_RATE)
+        self._queue_clip(_resample(data, samplerate, SAMPLE_RATE), key, gain)
+
+    def _queue_clip(self, resampled, key, gain):
+        main_data = _match_channels(resampled, self.output_channels)
+        monitor_data = _match_channels(resampled, self.monitor_channels)
         with self._lock:
             if key is not None:
                 self._active_sounds = [s for s in self._active_sounds if s.key != key]
                 self._active_sounds_monitor = [s for s in self._active_sounds_monitor if s.key != key]
             if self.output_stream is not None:
-                main_data = _match_channels(resampled, self.output_channels)
                 self._active_sounds.append(_ActiveSound(main_data, key, gain))
             if self.monitor_stream is not None and not self.monitor_muted:
-                monitor_data = _match_channels(resampled, self.monitor_channels)
                 self._active_sounds_monitor.append(_ActiveSound(monitor_data, key, gain))
 
     def play(self, path, gain=1.0):
-        data, samplerate = sf.read(path, dtype="float32", always_2d=True)
-        self.play_data(data, samplerate, key=os.path.abspath(path), gain=gain)
+        """Queue a file for playback without blocking the caller. Errors
+        are reported through on_error."""
+        self._requests.put((path, gain, True))
+
+    def preload(self, paths):
+        """Decode files into the cache in the background."""
+        for path in paths:
+            self._requests.put((path, 1.0, False))
+
+    def _worker(self):
+        while True:
+            path, gain, play = self._requests.get()
+            try:
+                if play and self.output_stream is None and self.monitor_stream is None:
+                    raise RuntimeError("No output device selected.")
+                data = self._load_clip(path)
+                if play:
+                    self._queue_clip(data, os.path.abspath(path), gain)
+            except FileNotFoundError:
+                if play and self.on_error is not None:
+                    self.on_error(f"File not found: {path}")
+            except Exception as e:
+                if play and self.on_error is not None:
+                    self.on_error(f"{os.path.basename(path)}: {e}")
+
+    def _load_clip(self, path):
+        """Return the file resampled to SAMPLE_RATE, from the cache when
+        the file is unchanged."""
+        stat = os.stat(path)
+        key = (os.path.abspath(path), stat.st_mtime_ns, stat.st_size)
+        with self._cache_lock:
+            data = self._clip_cache.get(key)
+            if data is not None:
+                self._clip_cache.move_to_end(key)
+                return data
+        raw, samplerate = sf.read(path, dtype="float32", always_2d=True)
+        data = _resample(raw, samplerate, SAMPLE_RATE)
+        if data.nbytes > CLIP_CACHE_BYTES:
+            return data
+        with self._cache_lock:
+            for old_key in [k for k in self._clip_cache if k[0] == key[0]]:
+                self._clip_cache_bytes -= self._clip_cache.pop(old_key).nbytes
+            self._clip_cache[key] = data
+            self._clip_cache_bytes += data.nbytes
+            while self._clip_cache_bytes > CLIP_CACHE_BYTES:
+                _, old = self._clip_cache.popitem(last=False)
+                self._clip_cache_bytes -= old.nbytes
+        return data
 
 
 class Soundboard:
@@ -487,6 +545,7 @@ class Soundboard:
         is_first_run = not os.path.exists(CONFIG_PATH)
 
         self.audio_engine = AudioEngine()
+        self.audio_engine.on_error = self._on_playback_error
         self.hotkey_listener = None
         self._pending_save = None
 
@@ -539,6 +598,9 @@ class Soundboard:
 
         self._restart_audio_engine()
         self._apply_hotkeys()
+        self.audio_engine.preload(
+            resolve_sound_path(s["path"]) for s in self.config["sounds"] if s.get("enabled", True)
+        )
 
     # -- device listing -----------------------------------------------------
 
@@ -1011,10 +1073,11 @@ class Soundboard:
 
     def play_sound(self, sound):
         path = resolve_sound_path(sound["path"])
-        try:
-            self.audio_engine.play(path, gain=sound.get("volume", 100) / 100)
-        except Exception as e:
-            self.root.after(0, lambda: messagebox.showerror("Playback error", str(e)))
+        self.audio_engine.play(path, gain=sound.get("volume", 100) / 100)
+
+    def _on_playback_error(self, message):
+        # Called from the audio worker thread.
+        self.root.after(0, lambda: messagebox.showerror("Playback error", message))
 
     # -- hotkeys --------------------------------------------------------
 
