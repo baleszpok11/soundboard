@@ -52,7 +52,8 @@ ICON_PATH = os.path.join(ASSETS_DIR, "icon.png")
 SAMPLE_RATE = 48000
 CHANNELS = 2
 BLOCK_SIZE = 1024
-MIC_BUFFER_LIMIT = 50  # chunks; caps latency/memory if the output stalls
+MIC_TARGET_FRAMES = SAMPLE_RATE // 10  # 100 ms cushion against uneven mic delivery
+MIC_MAX_FRAMES = SAMPLE_RATE // 2  # drop older mic audio beyond 500 ms
 BASS_CUTOFF_HZ = 200.0
 
 NO_DEVICE_LABEL = "(none)"
@@ -203,8 +204,11 @@ class AudioEngine:
         self.output_channels = CHANNELS
         self.monitor_channels = CHANNELS
         self._mic_buffer = collections.deque()
+        self._mic_frames = 0
+        self._mic_ready = False
         self._active_sounds = []
         self._active_sounds_monitor = []
+        self.dropouts = 0
 
     @staticmethod
     def _device_channels(device, output):
@@ -221,6 +225,7 @@ class AudioEngine:
                 channels=self.input_channels,
                 samplerate=SAMPLE_RATE,
                 blocksize=BLOCK_SIZE,
+                latency="high",
                 dtype="float32",
                 callback=self._on_input,
             )
@@ -232,6 +237,7 @@ class AudioEngine:
                 channels=self.output_channels,
                 samplerate=SAMPLE_RATE,
                 blocksize=BLOCK_SIZE,
+                latency="high",
                 dtype="float32",
                 callback=self._on_output,
             )
@@ -243,6 +249,7 @@ class AudioEngine:
                 channels=self.monitor_channels,
                 samplerate=SAMPLE_RATE,
                 blocksize=BLOCK_SIZE,
+                latency="high",
                 dtype="float32",
                 callback=self._on_monitor_output,
             )
@@ -257,8 +264,11 @@ class AudioEngine:
                 setattr(self, attr, None)
         with self._lock:
             self._mic_buffer.clear()
+            self._mic_frames = 0
+            self._mic_ready = False
             self._active_sounds = []
             self._active_sounds_monitor = []
+            self.dropouts = 0
 
     def set_monitor_muted(self, muted):
         with self._lock:
@@ -268,12 +278,17 @@ class AudioEngine:
 
     def _on_input(self, indata, frames, time_info, status):
         with self._lock:
+            if status:
+                self.dropouts += 1
             self._mic_buffer.append(indata.copy())
-            while len(self._mic_buffer) > MIC_BUFFER_LIMIT:
-                self._mic_buffer.popleft()
+            self._mic_frames += len(indata)
+            while self._mic_frames > MIC_MAX_FRAMES:
+                self._mic_frames -= len(self._mic_buffer.popleft())
 
     def _on_output(self, outdata, frames, time_info, status):
         with self._lock:
+            if status:
+                self.dropouts += 1
             mixed = self._pull_mic_frames(frames, self.output_channels)
             still_active = []
             for sound in self._active_sounds:
@@ -287,6 +302,8 @@ class AudioEngine:
 
     def _on_monitor_output(self, outdata, frames, time_info, status):
         with self._lock:
+            if status:
+                self.dropouts += 1
             mixed = np.zeros((frames, self.monitor_channels), dtype=np.float32)
             still_active = []
             for sound in self._active_sounds_monitor:
@@ -300,20 +317,43 @@ class AudioEngine:
 
     def _pull_mic_frames(self, frames, channels):
         out = np.zeros((frames, channels), dtype=np.float32)
-        filled = 0
-        while filled < frames and self._mic_buffer:
+        if not self._mic_ready:
+            if self._mic_frames < MIC_TARGET_FRAMES:
+                return out
+            self._mic_ready = True
+
+        # The mic and output run on separate clocks. Nudge mic playback
+        # speed by ~0.2% to keep the cushion near its target instead of
+        # letting drift empty it (gaps) or overfill it (skips).
+        step = max(1, frames // 500)
+        need = frames
+        if self._mic_frames < MIC_TARGET_FRAMES:
+            need -= step
+        elif self._mic_frames > MIC_TARGET_FRAMES * 2:
+            need += step
+
+        raw = self._take_mic(need)
+        if len(raw) < need:
+            self._mic_ready = False  # ran dry; rebuild the cushion first
+            out[:len(raw)] = _match_channels(raw, channels)
+            return out
+        return _match_channels(_resample(raw, need, frames), channels)
+
+    def _take_mic(self, count):
+        parts, taken = [], 0
+        while taken < count and self._mic_buffer:
             chunk = self._mic_buffer[0]
-            take = min(frames - filled, len(chunk))
-            piece = chunk[:take]
-            if piece.shape[1] != channels:
-                piece = _match_channels(piece, channels)
-            out[filled:filled + take] = piece
+            take = min(count - taken, len(chunk))
+            parts.append(chunk[:take])
             if take < len(chunk):
                 self._mic_buffer[0] = chunk[take:]
             else:
                 self._mic_buffer.popleft()
-            filled += take
-        return out
+            taken += take
+        self._mic_frames -= taken
+        if not parts:
+            return np.zeros((0, self.input_channels), dtype=np.float32)
+        return np.concatenate(parts)
 
     def play_data(self, data, samplerate, key=None):
         """Queue audio for playback. A clip with the same key that is
@@ -606,6 +646,14 @@ class Soundboard:
             frame, text="Add sound", command=self.add_sound,
             fg_color=COLOR_ORANGE, hover_color=COLOR_ORANGE_HOVER, text_color=COLOR_BG,
         ).pack(side="left")
+        self.dropout_label = ctk.CTkLabel(frame, text="", text_color=COLOR_TEXT_DIM)
+        self.dropout_label.pack(side="right")
+        self._update_dropout_label()
+
+    def _update_dropout_label(self):
+        count = self.audio_engine.dropouts
+        self.dropout_label.configure(text=f"Audio dropouts: {count}" if count else "")
+        self.root.after(1000, self._update_dropout_label)
 
     # -- sound management -------------------------------------------------
 
