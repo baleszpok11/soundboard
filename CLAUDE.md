@@ -17,6 +17,8 @@ others hear. Tabs: Soundboard, Download (yt-dlp to MP3), Sound Editor
 - scipy (lfilter for the RBJ low-shelf bass filter)
 - yt-dlp + imageio-ffmpeg (downloader; bundled ffmpeg, no system install)
 - pynput (global hotkeys, cross-platform, format like `<ctrl>+<alt>+1`)
+- Mic mute / push-to-talk: AudioEngine.mic_enabled, ramped over one block;
+  HotkeyListener (GlobalHotKeys subclass) reports a held talk key
 - Mixing: mic gain + soundboard gain + per-sound gain, then a block-based
   peak limiter (_Limiter) per output
 - Windows: device lists filtered to one host API (WASAPI with

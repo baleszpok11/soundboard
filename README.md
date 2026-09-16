@@ -147,8 +147,15 @@ too; if so, leave it off.
 - Playing a sound that's already playing restarts it from the beginning.
 - **Mic volume / Soundboard volume:** 0–200%. Each sound also has its own
   volume slider. A limiter keeps the combined output from distorting.
+- **Mute mic** silences your voice while sounds keep playing; "Set mute
+  hotkey" toggles it from anywhere. **Push to talk** only sends your voice
+  while the talk key is held (set it with "Set talk key"); sounds always
+  play. The label under them shows whether your mic is live.
 - **Stop all** silences every playing sound. "Set stop hotkey" assigns a
   global hotkey for it. The app won't let two actions share a hotkey.
+- Games that require their own push-to-talk key only send sounds while
+  you hold that key; use the game's open-mic/voice-activation mode, or
+  hold the key while a sound plays.
 - If something goes wrong, the app shows an error and writes details to
   `soundboard_error.log` next to your settings. If the settings file is
   damaged, it's kept as `soundboard_config.json.broken` and the app starts

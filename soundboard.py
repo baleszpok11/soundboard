@@ -145,6 +145,10 @@ def load_config():
     config.setdefault("mic_volume", 100)
     config.setdefault("sound_volume", 100)
     config.setdefault("stop_hotkey", None)
+    config.setdefault("mic_muted", False)
+    config.setdefault("mute_hotkey", None)
+    config.setdefault("push_to_talk", False)
+    config.setdefault("ptt_hotkey", None)
     config.setdefault("sounds", [])
     config["sounds"] = [s for s in config["sounds"] if isinstance(s, dict) and s.get("path")]
     for sound in config["sounds"]:
@@ -297,6 +301,8 @@ class AudioEngine:
         self._active_sounds_monitor = []
         self.dropouts = 0
         self.mic_gain = 1.0
+        self.mic_enabled = True  # False while muted or push-to-talk isn't held
+        self._mic_level = 1.0  # gain applied to the last block, for smooth changes
         self.sound_gain = 1.0
         self._output_limiter = _Limiter()
         self._monitor_limiter = _Limiter()
@@ -330,6 +336,7 @@ class AudioEngine:
         self.stop()
         self._started_at = time.monotonic()
         self._last_callback = {}
+        self._mic_level = self.mic_gain if self.mic_enabled else 0.0
         if input_device is not None:
             self.input_channels = self._device_channels(input_device, output=False)
             self.input_stream = sd.InputStream(
@@ -436,7 +443,13 @@ class AudioEngine:
             if status:
                 self.dropouts += 1
             mixed = self._pull_mic_frames(frames, self.output_channels)
-            mixed *= self.mic_gain
+            # Ramp gain changes over the block so muting doesn't click.
+            target = self.mic_gain if self.mic_enabled else 0.0
+            if target != self._mic_level:
+                mixed *= np.linspace(self._mic_level, target, frames, dtype=np.float32)[:, None]
+                self._mic_level = target
+            else:
+                mixed *= target
             mixed += self._mix_sounds("_active_sounds", frames, self.output_channels)
         outdata[:] = self._output_limiter.process(mixed)
 
@@ -569,6 +582,36 @@ class AudioEngine:
                 _, old = self._clip_cache.popitem(last=False)
                 self._clip_cache_bytes -= old.nbytes
         return data
+
+
+class HotkeyListener(pynkeyboard.GlobalHotKeys):
+    """GlobalHotKeys that also reports while a key combination is held
+    (push-to-talk). on_hold(held) runs on the listener thread."""
+
+    def __init__(self, hotkeys, hold_hotkey=None, on_hold=None):
+        super().__init__(hotkeys)
+        self._hold_keys = frozenset(pynkeyboard.HotKey.parse(hold_hotkey)) if hold_hotkey else frozenset()
+        self._on_hold = on_hold
+        self._pressed = set()
+        self._holding = False
+
+    def _on_press(self, key, injected):
+        super()._on_press(key, injected)
+        if self._hold_keys and not injected:
+            self._pressed.add(self.canonical(key))
+            self._update_hold()
+
+    def _on_release(self, key, injected):
+        super()._on_release(key, injected)
+        if self._hold_keys and not injected:
+            self._pressed.discard(self.canonical(key))
+            self._update_hold()
+
+    def _update_hold(self):
+        holding = self._hold_keys <= self._pressed
+        if holding != self._holding:
+            self._holding = holding
+            self._on_hold(holding)
 
 
 class Soundboard:
@@ -800,6 +843,108 @@ class Soundboard:
 
         self._add_volume_row(frame, 2, "Mic volume:", "mic_volume", "mic_gain")
         self._add_volume_row(frame, 3, "Soundboard volume:", "sound_volume", "sound_gain")
+        self._build_mic_controls(frame, 4)
+
+    def _build_mic_controls(self, frame, row):
+        ctk.CTkLabel(frame, text="Mic:", text_color=COLOR_TEXT).grid(row=row, column=0, sticky="w", padx=8, pady=6)
+        box = ctk.CTkFrame(frame, fg_color=COLOR_SURFACE)
+        box.grid(row=row, column=1, columnspan=2, sticky="ew", padx=8, pady=6)
+        checkbox = dict(
+            fg_color=COLOR_ORANGE, hover_color=COLOR_ORANGE_HOVER,
+            checkmark_color=COLOR_BG, text_color=COLOR_TEXT,
+        )
+        button = dict(
+            fg_color=COLOR_ROW, hover_color=COLOR_SURFACE, text_color=COLOR_ORANGE,
+            border_width=1, border_color=COLOR_ORANGE,
+        )
+        self.mute_checkbox = ctk.CTkCheckBox(box, text="Mute mic", command=self._on_toggle_mute, **checkbox)
+        self.mute_checkbox.grid(row=0, column=0, sticky="w")
+        self.mute_hotkey_button = ctk.CTkButton(box, text="", command=self.set_mute_hotkey, **button)
+        self.mute_hotkey_button.grid(row=0, column=1, sticky="w", padx=8)
+        self.ptt_checkbox = ctk.CTkCheckBox(box, text="Push to talk", command=self._on_toggle_ptt, **checkbox)
+        self.ptt_checkbox.grid(row=1, column=0, sticky="w", pady=(6, 0))
+        self.ptt_hotkey_button = ctk.CTkButton(box, text="", command=self.set_ptt_hotkey, **button)
+        self.ptt_hotkey_button.grid(row=1, column=1, sticky="w", padx=8, pady=(6, 0))
+        self.mic_status = ctk.CTkLabel(box, text="", text_color=COLOR_TEXT_DIM, anchor="w")
+        self.mic_status.grid(row=2, column=0, columnspan=2, sticky="w", pady=(4, 0))
+        if self.config["mic_muted"]:
+            self.mute_checkbox.select()
+        if self.config["push_to_talk"]:
+            self.ptt_checkbox.select()
+        self._ptt_held = False
+        self._update_mic_hotkey_buttons()
+        self._update_mic_state()
+
+    def _update_mic_hotkey_buttons(self):
+        mute = self.config.get("mute_hotkey")
+        ptt = self.config.get("ptt_hotkey")
+        self.mute_hotkey_button.configure(text=f"Mute hotkey: {mute}" if mute else "Set mute hotkey")
+        self.ptt_hotkey_button.configure(text=f"Talk key: {ptt}" if ptt else "Set talk key")
+
+    def _update_mic_state(self):
+        """Open the mic unless it's muted, or push-to-talk is on and its key
+        isn't held."""
+        live = False
+        ptt = self.config["push_to_talk"]
+        if self.config["mic_muted"]:
+            status, color = "Muted", COLOR_ERROR
+        elif ptt and not self.config.get("ptt_hotkey"):
+            status, color = "Set a talk key to use push to talk", COLOR_ERROR
+        elif ptt and not self._ptt_held:
+            status, color = "Hold the talk key to speak", COLOR_TEXT_DIM
+        else:
+            live = True
+            status, color = "Live", COLOR_ORANGE
+        self.audio_engine.mic_enabled = live
+        self.mic_status.configure(text=status, text_color=color)
+
+    def _on_toggle_mute(self):
+        self.config["mic_muted"] = bool(self.mute_checkbox.get())
+        save_config(self.config)
+        self._update_mic_state()
+
+    def _toggle_mute_from_hotkey(self):
+        # Runs on the listener thread; Tk must be touched from the main thread.
+        def toggle():
+            if self.mute_checkbox.get():
+                self.mute_checkbox.deselect()
+            else:
+                self.mute_checkbox.select()
+            self._on_toggle_mute()
+        self.root.after(0, toggle)
+
+    def _on_toggle_ptt(self):
+        self.config["push_to_talk"] = bool(self.ptt_checkbox.get())
+        save_config(self.config)
+        self._apply_hotkeys()
+        self._update_mic_state()
+
+    def _on_ptt_hold(self, held):
+        # Runs on the listener thread: switch the mic right away, then
+        # update the label on the main thread.
+        self._ptt_held = held
+        if self.config["push_to_talk"] and not self.config["mic_muted"]:
+            self.audio_engine.mic_enabled = held
+        self.root.after(0, self._update_mic_state)
+
+    def set_mute_hotkey(self):
+        hotkey = self._ask_hotkey("Mute mic hotkey", self.config.get("mute_hotkey"), owner="mute")
+        if hotkey is None:
+            return
+        self.config["mute_hotkey"] = hotkey or None
+        save_config(self.config)
+        self._update_mic_hotkey_buttons()
+        self._apply_hotkeys()
+
+    def set_ptt_hotkey(self):
+        hotkey = self._ask_hotkey("Push to talk key", self.config.get("ptt_hotkey"), owner="ptt")
+        if hotkey is None:
+            return
+        self.config["ptt_hotkey"] = hotkey or None
+        save_config(self.config)
+        self._update_mic_hotkey_buttons()
+        self._apply_hotkeys()
+        self._update_mic_state()
 
     def _add_volume_row(self, frame, row, text, config_key, engine_attr):
         ctk.CTkLabel(frame, text=text, text_color=COLOR_TEXT).grid(row=row, column=0, sticky="w", padx=8, pady=6)
@@ -1237,7 +1382,11 @@ class Soundboard:
 
     def _hotkey_owner(self, hotkey, skip):
         keys = self._hotkey_keys(hotkey)
-        candidates = [("stop", "Stop all", self.config.get("stop_hotkey"))]
+        candidates = [
+            ("stop", "Stop all", self.config.get("stop_hotkey")),
+            ("mute", "Mute mic", self.config.get("mute_hotkey")),
+            ("ptt", "Push to talk", self.config.get("ptt_hotkey")),
+        ]
         candidates += [(s, f"'{s['name']}'", s.get("hotkey")) for s in self.config["sounds"]]
         for obj, label, other in candidates:
             if obj is not skip and other and self._hotkey_keys(other) == keys:
@@ -1286,13 +1435,22 @@ class Soundboard:
         stop_hotkey = self.config.get("stop_hotkey")
         if stop_hotkey and self._is_valid_hotkey(stop_hotkey):
             mapping[stop_hotkey] = self.audio_engine.stop_all
+        mute_hotkey = self.config.get("mute_hotkey")
+        if mute_hotkey and self._is_valid_hotkey(mute_hotkey):
+            mapping[mute_hotkey] = self._toggle_mute_from_hotkey
+        ptt_hotkey = self.config.get("ptt_hotkey")
+        if not (self.config.get("push_to_talk") and ptt_hotkey and self._is_valid_hotkey(ptt_hotkey)):
+            ptt_hotkey = None
+        self._ptt_held = False
 
-        if mapping:
+        if mapping or ptt_hotkey:
             try:
-                self.hotkey_listener = pynkeyboard.GlobalHotKeys(mapping)
+                self.hotkey_listener = HotkeyListener(mapping, ptt_hotkey, self._on_ptt_hold)
                 self.hotkey_listener.start()
             except Exception as e:
                 messagebox.showwarning("Hotkey error", f"Could not register hotkeys: {e}")
+        if hasattr(self, "mic_status"):
+            self._update_mic_state()
 
     # -- download tab -------------------------------------------------------
 
