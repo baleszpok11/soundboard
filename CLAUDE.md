@@ -1,26 +1,9 @@
 # Soundboard
 
-Open-source cross-platform (Windows, macOS, Linux) soundboard in Python.
-Continuously mixes microphone input with triggered sound clips and sends
-the result to a chosen output device (virtual audio cable) so voice and
-sounds are picked up together as one microphone in Discord/games.
-A "Hear soundboard" toggle mirrors clips (not the mic) to the system
-default output, so you can hear them yourself without affecting what
-others hear. Tabs: Soundboard, Download (yt-dlp to MP3), Sound Editor
-(trim + bass).
+Cross-platform Python soundboard that mixes the mic with sound clips into a
+virtual audio cable.
 
-## Stack
-- Python, CustomTkinter (GUI, orange/black theme, CTkTabview)
-- sounddevice (input/output streams) + soundfile (decoding) + numpy
-  (real-time mixing of mic input and sound clips, simple linear-interp
-  resampling to 48kHz; channel count negotiated per device, max 2)
-- scipy (lfilter for the RBJ low-shelf bass filter)
-- yt-dlp + imageio-ffmpeg (downloader; bundled ffmpeg, no system install)
-- pynput (global hotkeys, cross-platform, format like `<ctrl>+<alt>+1`)
-- Mic mute / push-to-talk: AudioEngine.mic_enabled, ramped over one block;
-  HotkeyListener (GlobalHotKeys subclass) reports a held talk key
-- Mixing: mic gain + soundboard gain + per-sound gain, then a block-based
-  peak limiter (_Limiter) per output
+## Stack notes
 - Windows: device lists filtered to one host API (WASAPI with
   auto_convert, falling back to MME; choice saved as config "host_api")
 - Linux: sounddevice doesn't bundle PortAudio (libportaudio2); a missing
@@ -58,19 +41,3 @@ others hear. Tabs: Soundboard, Download (yt-dlp to MP3), Sound Editor
 - Squash-merge (`gh pr merge --squash`); the repo deletes the source branch
   on merge. Merge only when the user says so.
 - Releases: tag master (`vX.Y.Z`) after merging; CI builds and publishes.
-
-## Files
-- soundboard.py — main app
-- assets/icon.svg, icon.png, icon.ico, icon.icns — app icon (window icon +
-  PyInstaller build icon); source is icon.svg, others are rendered from it
-- requirements.txt — pip dependencies
-- build-requirements.txt — pip dependencies for building executables (pyinstaller)
-- README.md — setup and usage instructions
-- soundboard_config.json — generated at runtime, holds device + sound/hotkey mappings
-- Sounds/ — generated at runtime, holds all sound files (downloads, edits, imports)
-- Runtime data location: next to soundboard.py from source, next to the
-  executable in Windows/Linux builds, ~/Documents/Soundboard in the macOS app
-- .github/workflows/build.yml — CI matrix build of Windows/macOS/Linux executables;
-  release notes start with "Built with yt-dlp <version>"
-- .github/workflows/check-ytdlp.yml — weekly; opens an issue when PyPI has a
-  newer yt-dlp than the latest release
