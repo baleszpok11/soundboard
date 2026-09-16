@@ -12,8 +12,8 @@ first run. Sound files live in the Sounds/ folder next to this script.
 """
 
 import collections
-import datetime
 import contextlib
+import datetime
 import filecmp
 import json
 import os
