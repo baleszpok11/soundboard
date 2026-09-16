@@ -13,6 +13,7 @@ first run. Sound files live in the Sounds/ folder next to this script.
 
 import collections
 import contextlib
+import datetime
 import filecmp
 import json
 import os
@@ -26,6 +27,7 @@ import threading
 import time
 import tkinter as tk
 import traceback
+import webbrowser
 from tkinter import filedialog, messagebox
 
 import customtkinter as ctk
@@ -39,6 +41,7 @@ except OSError as e:
     PORTAUDIO_ERROR = e
 import soundfile as sf
 import yt_dlp
+import yt_dlp.version
 from pynput import keyboard as pynkeyboard
 from scipy.signal import lfilter
 
@@ -70,6 +73,8 @@ BASS_CUTOFF_HZ = 200.0
 MIN_CLIP_S = 0.05  # shortest clip the editor can trim to
 SAVE_PEAK = 0.99  # edited clips louder than full scale are scaled down to this
 EDITOR_PLACEHOLDER = "Choose a sound..."
+RELEASES_URL = "https://github.com/baleszpok11/soundboard/releases/latest"
+DOWNLOADER_STALE_DAYS = 60  # sites change often; older yt-dlp versions start failing
 EDITOR_PREVIEW_KEY = "editor-preview"
 VOLUME_MAX = 200  # percent
 CLIP_CACHE_BYTES = 512 * 1024 * 1024  # decoded clips kept in memory
@@ -114,6 +119,14 @@ def sanitize_filename(name):
     return name or "sound"
 
 
+def downloader_age_days():
+    """Days since the bundled yt-dlp was released (its version is a date),
+    or None if the version can't be parsed."""
+    try:
+        released = datetime.datetime.strptime(yt_dlp.version.__version__[:10], "%Y.%m.%d").date()
+    except ValueError:
+        return None
+    return (datetime.date.today() - released).days
 def hotkey_permission_granted():
     """False when macOS will silently block global hotkeys because the app
     has neither Input Monitoring nor Accessibility permission."""
@@ -1405,8 +1418,23 @@ class Soundboard:
         )
         self.download_button.pack(anchor="w", padx=8, pady=(0, 8))
 
-        self.download_status = ctk.CTkLabel(frame, text="", text_color=COLOR_TEXT, anchor="w")
+        self.download_status = ctk.CTkLabel(
+            frame, text="", text_color=COLOR_TEXT, anchor="w", justify="left", wraplength=800,
+        )
         self.download_status.pack(fill="x", padx=8, pady=(0, 8))
+        self.download_update_button = ctk.CTkButton(
+            frame, text="Open releases page", command=lambda: webbrowser.open(RELEASES_URL),
+            fg_color=COLOR_ROW, hover_color=COLOR_SURFACE, text_color=COLOR_ORANGE,
+            border_width=1, border_color=COLOR_ORANGE,
+        )
+
+        version_text = f"Downloader: yt-dlp {yt_dlp.version.__version__}"
+        age = downloader_age_days()
+        if age is not None and age > DOWNLOADER_STALE_DAYS:
+            version_text += f" ({age} days old; if downloads fail, {self._update_hint()})"
+        ctk.CTkLabel(
+            frame, text=version_text, text_color=COLOR_TEXT_DIM, anchor="w", justify="left", wraplength=800,
+        ).pack(fill="x", padx=8, pady=(0, 8))
 
         ctk.CTkLabel(
             parent,
@@ -1425,6 +1453,7 @@ class Soundboard:
         url = self.download_url_entry.get().strip()
         if not url:
             return
+        self.download_update_button.pack_forget()
         self.download_button.configure(state="disabled")
         self.download_status.configure(text="Downloading...", text_color=COLOR_TEXT)
         threading.Thread(target=self._download_worker, args=(url,), daemon=True).start()
@@ -1459,9 +1488,24 @@ class Soundboard:
             return
         self.root.after(0, lambda: self._on_download_done(final_path, title))
 
+    @staticmethod
+    def _update_hint():
+        if getattr(sys, "frozen", False):
+            return "get the latest Soundboard release"
+        return "run: pip install -U yt-dlp"
+
     def _on_download_error(self, message):
         self.download_button.configure(state="normal")
-        self.download_status.configure(text=f"Download failed: {message}", text_color=COLOR_ERROR)
+        self.download_status.configure(
+            text=(
+                f"Download failed: {message}\n\nIf the link works in your browser, the built-in "
+                f"downloader (yt-dlp {yt_dlp.version.__version__}) may be outdated, since sites "
+                f"change often. To update, {self._update_hint()}."
+            ),
+            text_color=COLOR_ERROR,
+        )
+        if getattr(sys, "frozen", False):
+            self.download_update_button.pack(anchor="w", padx=8, pady=(0, 8), after=self.download_status)
 
     def _on_download_done(self, path, title):
         self.download_button.configure(state="normal")
