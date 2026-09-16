@@ -43,6 +43,15 @@ others hear. Tabs: Soundboard, Download (yt-dlp to MP3), Sound Editor
 - No emojis in code or comments.
 - Keep explanations brief.
 
+## Workflow
+- One branch per issue off an up-to-date master: `issue-<number>-<short-slug>`
+  (non-issue work: `fix-<slug>` / `feature-<slug>`).
+- Open a PR into master with `Fixes #<number>` in the body, so merging
+  closes the issue. Don't close issues by hand or push to master directly.
+- Squash-merge (`gh pr merge --squash`); the repo deletes the source branch
+  on merge. Merge only when the user says so.
+- Releases: tag master (`vX.Y.Z`) after merging; CI builds and publishes.
+
 ## Files
 - soundboard.py — main app
 - assets/icon.svg, icon.png, icon.ico, icon.icns — app icon (window icon +
