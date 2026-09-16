@@ -23,6 +23,9 @@ together, from one virtual microphone.
   too — turning it off doesn't affect what others hear through the
   virtual cable
 - Re-triggering a sound that's still playing restarts it
+- "Stop all" button and optional hotkey
+- Volume sliders for the mic, the whole soundboard, and each sound, plus
+  a limiter so loud moments get quieter instead of distorting
 - **Download** tab: grab audio from YouTube, TikTok, Instagram and other
   sites (via yt-dlp) as MP3, straight into your board
 - **Sound Editor** tab: trim a clip's start/end and boost or cut bass,
@@ -106,6 +109,14 @@ virtual cable as your microphone in Discord/games.
 - A sound listed in red with "(file missing)" points at a file that's
   been moved or deleted since it was added.
 - Playing a sound that's already playing restarts it from the beginning.
+- **Mic volume / Soundboard volume:** 0–200%. Each sound also has its own
+  volume slider. A limiter keeps the combined output from distorting.
+- **Stop all** silences every playing sound. "Set stop hotkey" assigns a
+  global hotkey for it. The app won't let two actions share a hotkey.
+- If something goes wrong, the app shows an error and writes details to
+  `soundboard_error.log` next to your settings. If the settings file is
+  damaged, it's kept as `soundboard_config.json.broken` and the app starts
+  with defaults.
 - **Download tab:** paste a video/clip URL and click "Download as MP3".
   The audio is saved into `Sounds/` and added to the board. Only download
   content you have the right to use; downloading may be against the
@@ -173,6 +184,11 @@ downloader needs read access) for others to reach the Releases page.
   count (mono or stereo) and audio is converted between them. If a device
   doesn't support 48000 Hz, opening it will show an error — pick a
   different device or check its properties in your OS's sound settings.
+- On Windows, devices are listed once each, using WASAPI (full names,
+  lower latency). If a device won't open with WASAPI, the app switches to
+  MME (the older Windows audio system) and remembers that choice.
+- On first run, the output defaults to a detected virtual cable
+  (VB-CABLE, BlackHole) if one is installed.
 - Devices are remembered by name, so plugging in new audio devices
   doesn't change your selection.
 - Global hotkeys are handled via `pynput`. On Linux with Wayland, global

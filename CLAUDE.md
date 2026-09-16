@@ -17,6 +17,12 @@ others hear. Tabs: Soundboard, Download (yt-dlp to MP3), Sound Editor
 - scipy (lfilter for the RBJ low-shelf bass filter)
 - yt-dlp + imageio-ffmpeg (downloader; bundled ffmpeg, no system install)
 - pynput (global hotkeys, cross-platform, format like `<ctrl>+<alt>+1`)
+- Mixing: mic gain + soundboard gain + per-sound gain, then a block-based
+  peak limiter (_Limiter) per output
+- Windows: device lists filtered to one host API (WASAPI with
+  auto_convert, falling back to MME; choice saved as config "host_api")
+- Errors: Tk callback errors and startup failures show a dialog and append
+  to soundboard_error.log; config writes are atomic
 - JSON file for config (no database); devices stored by name, sounds by
   filename relative to Sounds/
 - PyInstaller (standalone executables), built via GitHub Actions CI; needs

@@ -17,8 +17,10 @@ import os
 import re
 import shutil
 import sys
+import tempfile
 import threading
 import tkinter as tk
+import traceback
 from tkinter import filedialog, messagebox
 
 import customtkinter as ctk
@@ -55,8 +57,17 @@ BLOCK_SIZE = 1024
 MIC_TARGET_FRAMES = SAMPLE_RATE // 10  # 100 ms cushion against uneven mic delivery
 MIC_MAX_FRAMES = SAMPLE_RATE // 2  # drop older mic audio beyond 500 ms
 BASS_CUTOFF_HZ = 200.0
+VOLUME_MAX = 200  # percent
+LIMITER_CEILING = 0.89  # about -1 dBFS
+LIMITER_RELEASE_S = 0.3
 
 NO_DEVICE_LABEL = "(none)"
+# On Windows every device is listed once per host API; show one API only.
+# WASAPI has full names and lower latency; MME is the fallback.
+WINDOWS_HOSTAPIS = ("Windows WASAPI", "MME")
+MME_NAME_LENGTH = 31
+# Substrings that identify common virtual cables, preferred as the output.
+VIRTUAL_CABLE_HINTS = ("cable input", "blackhole", "vb-audio", "soundboard")
 
 COLOR_BG = "#121212"
 COLOR_SURFACE = "#1e1e1e"
@@ -94,11 +105,13 @@ def unique_path(path):
 
 
 def load_config():
+    """Raises ValueError if the file exists but is not a valid config."""
+    config = {}
     if os.path.exists(CONFIG_PATH):
-        with open(CONFIG_PATH, "r") as f:
+        with open(CONFIG_PATH, "r", encoding="utf-8") as f:
             config = json.load(f)
-    else:
-        config = {}
+        if not isinstance(config, dict) or not isinstance(config.get("sounds", []), list):
+            raise ValueError("config has an unexpected structure")
     if "device" in config and "output_device" not in config:
         config["output_device"] = config.pop("device")
     config.setdefault("output_device", None)
@@ -106,15 +119,40 @@ def load_config():
     config.pop("monitor_device", None)
     config.pop("monitor_muted", None)
     config.setdefault("hear_self", True)
+    config.setdefault("mic_volume", 100)
+    config.setdefault("sound_volume", 100)
+    config.setdefault("stop_hotkey", None)
     config.setdefault("sounds", [])
+    config["sounds"] = [s for s in config["sounds"] if isinstance(s, dict) and s.get("path")]
     for sound in config["sounds"]:
+        sound.setdefault("name", os.path.splitext(os.path.basename(sound["path"]))[0])
+        sound.setdefault("hotkey", None)
         sound.setdefault("enabled", True)
+        sound.setdefault("volume", 100)
     return config
 
 
 def save_config(config):
-    with open(CONFIG_PATH, "w") as f:
+    # Write to a temp file and swap it in, so a crash mid-write can't
+    # leave a truncated config behind.
+    tmp_path = CONFIG_PATH + ".tmp"
+    with open(tmp_path, "w", encoding="utf-8") as f:
         json.dump(config, f, indent=2)
+    os.replace(tmp_path, CONFIG_PATH)
+
+
+def write_error_log(text):
+    """Append to a log next to the config, or in the temp dir if that
+    folder isn't writable. Returns the path written, or None."""
+    for folder in (APP_DIR, tempfile.gettempdir()):
+        path = os.path.join(folder, "soundboard_error.log")
+        try:
+            with open(path, "a", encoding="utf-8") as f:
+                f.write(text + "\n")
+            return path
+        except OSError:
+            continue
+    return None
 
 
 def _resample(data, orig_sr, target_sr):
@@ -171,20 +209,46 @@ def apply_bass(data, gain_db, sample_rate, cutoff_hz=BASS_CUTOFF_HZ):
 
 
 class _ActiveSound:
-    def __init__(self, data, key=None):
+    def __init__(self, data, key=None, gain=1.0):
         self.data = data
         self.key = key
+        self.gain = gain
         self.position = 0
 
     def read(self, frames):
         end = min(self.position + frames, len(self.data))
-        chunk = self.data[self.position:end]
+        chunk = self.data[self.position:end] * self.gain
         self.position = end
         finished = self.position >= len(self.data)
         if len(chunk) < frames:
             pad = np.zeros((frames - len(chunk), self.data.shape[1]), dtype=np.float32)
             chunk = np.vstack([chunk, pad]) if len(chunk) else pad
         return chunk, finished
+
+
+class _Limiter:
+    """Block-based peak limiter. Gain drops instantly when a block would
+    exceed the ceiling and recovers smoothly afterwards, so loud mixes
+    get quieter instead of distorting."""
+
+    def __init__(self):
+        self.gain = 1.0
+        blocks_per_second = SAMPLE_RATE / BLOCK_SIZE
+        self.release = 1.0 - np.exp(-1.0 / (LIMITER_RELEASE_S * blocks_per_second))
+
+    def process(self, block):
+        peak = float(np.abs(block).max()) if block.size else 0.0
+        target = min(1.0, LIMITER_CEILING / peak) if peak > 0 else 1.0
+        if target < self.gain:
+            # A downward ramp would let the start of the block overshoot.
+            self.gain = target
+            block *= target
+        else:
+            new_gain = self.gain + (target - self.gain) * self.release
+            block *= np.linspace(self.gain, new_gain, len(block), dtype=np.float32)[:, None]
+            self.gain = new_gain
+        np.clip(block, -1.0, 1.0, out=block)
+        return block
 
 
 class AudioEngine:
@@ -209,12 +273,25 @@ class AudioEngine:
         self._active_sounds = []
         self._active_sounds_monitor = []
         self.dropouts = 0
+        self.mic_gain = 1.0
+        self.sound_gain = 1.0
+        self._output_limiter = _Limiter()
+        self._monitor_limiter = _Limiter()
 
     @staticmethod
     def _device_channels(device, output):
         info = sd.query_devices(device)
         key = "max_output_channels" if output else "max_input_channels"
         return max(1, min(CHANNELS, info[key]))
+
+    @staticmethod
+    def _extra_settings(device):
+        # WASAPI shared mode only accepts the device's own sample rate
+        # unless Windows is allowed to convert.
+        hostapi = sd.query_hostapis(sd.query_devices(device)["hostapi"])["name"]
+        if hostapi == "Windows WASAPI":
+            return sd.WasapiSettings(auto_convert=True)
+        return None
 
     def start(self, input_device, output_device, monitor_device):
         self.stop()
@@ -227,6 +304,7 @@ class AudioEngine:
                 blocksize=BLOCK_SIZE,
                 latency="high",
                 dtype="float32",
+                extra_settings=self._extra_settings(input_device),
                 callback=self._on_input,
             )
             self.input_stream.start()
@@ -239,6 +317,7 @@ class AudioEngine:
                 blocksize=BLOCK_SIZE,
                 latency="high",
                 dtype="float32",
+                extra_settings=self._extra_settings(output_device),
                 callback=self._on_output,
             )
             self.output_stream.start()
@@ -251,6 +330,7 @@ class AudioEngine:
                 blocksize=BLOCK_SIZE,
                 latency="high",
                 dtype="float32",
+                extra_settings=self._extra_settings(monitor_device),
                 callback=self._on_monitor_output,
             )
             self.monitor_stream.start()
@@ -269,6 +349,13 @@ class AudioEngine:
             self._active_sounds = []
             self._active_sounds_monitor = []
             self.dropouts = 0
+            self._output_limiter = _Limiter()
+            self._monitor_limiter = _Limiter()
+
+    def stop_all(self):
+        with self._lock:
+            self._active_sounds = []
+            self._active_sounds_monitor = []
 
     def set_monitor_muted(self, muted):
         with self._lock:
@@ -290,30 +377,30 @@ class AudioEngine:
             if status:
                 self.dropouts += 1
             mixed = self._pull_mic_frames(frames, self.output_channels)
-            still_active = []
-            for sound in self._active_sounds:
-                chunk, finished = sound.read(frames)
-                mixed += chunk
-                if not finished:
-                    still_active.append(sound)
-            self._active_sounds = still_active
-        np.clip(mixed, -1.0, 1.0, out=mixed)
-        outdata[:] = mixed
+            mixed *= self.mic_gain
+            mixed += self._mix_sounds("_active_sounds", frames, self.output_channels)
+        outdata[:] = self._output_limiter.process(mixed)
 
     def _on_monitor_output(self, outdata, frames, time_info, status):
         with self._lock:
             if status:
                 self.dropouts += 1
-            mixed = np.zeros((frames, self.monitor_channels), dtype=np.float32)
-            still_active = []
-            for sound in self._active_sounds_monitor:
-                chunk, finished = sound.read(frames)
-                mixed += chunk
-                if not finished:
-                    still_active.append(sound)
-            self._active_sounds_monitor = still_active
-        np.clip(mixed, -1.0, 1.0, out=mixed)
-        outdata[:] = mixed
+            mixed = self._mix_sounds("_active_sounds_monitor", frames, self.monitor_channels)
+        outdata[:] = self._monitor_limiter.process(mixed)
+
+    def _mix_sounds(self, attr, frames, channels):
+        """Sum one block from each clip in the named list, drop finished
+        clips, and apply the soundboard volume. Caller holds the lock."""
+        mixed = np.zeros((frames, channels), dtype=np.float32)
+        still_active = []
+        for sound in getattr(self, attr):
+            chunk, finished = sound.read(frames)
+            mixed += chunk
+            if not finished:
+                still_active.append(sound)
+        setattr(self, attr, still_active)
+        mixed *= self.sound_gain
+        return mixed
 
     def _pull_mic_frames(self, frames, channels):
         out = np.zeros((frames, channels), dtype=np.float32)
@@ -355,7 +442,7 @@ class AudioEngine:
             return np.zeros((0, self.input_channels), dtype=np.float32)
         return np.concatenate(parts)
 
-    def play_data(self, data, samplerate, key=None):
+    def play_data(self, data, samplerate, key=None, gain=1.0):
         """Queue audio for playback. A clip with the same key that is
         still playing is stopped first, so re-triggering restarts it."""
         if self.output_stream is None and self.monitor_stream is None:
@@ -367,14 +454,14 @@ class AudioEngine:
                 self._active_sounds_monitor = [s for s in self._active_sounds_monitor if s.key != key]
             if self.output_stream is not None:
                 main_data = _match_channels(resampled, self.output_channels)
-                self._active_sounds.append(_ActiveSound(main_data, key))
+                self._active_sounds.append(_ActiveSound(main_data, key, gain))
             if self.monitor_stream is not None and not self.monitor_muted:
                 monitor_data = _match_channels(resampled, self.monitor_channels)
-                self._active_sounds_monitor.append(_ActiveSound(monitor_data, key))
+                self._active_sounds_monitor.append(_ActiveSound(monitor_data, key, gain))
 
-    def play(self, path):
+    def play(self, path, gain=1.0):
         data, samplerate = sf.read(path, dtype="float32", always_2d=True)
-        self.play_data(data, samplerate, key=os.path.abspath(path))
+        self.play_data(data, samplerate, key=os.path.abspath(path), gain=gain)
 
 
 class Soundboard:
@@ -386,16 +473,29 @@ class Soundboard:
 
         ensure_sounds_dir()
 
+        try:
+            self.config = load_config()
+        except (ValueError, OSError) as e:
+            backup = unique_path(CONFIG_PATH + ".broken")
+            os.replace(CONFIG_PATH, backup)
+            messagebox.showwarning(
+                "Settings reset",
+                f"Your settings file could not be read ({e}), so Soundboard "
+                f"started with default settings.\n\nThe old file was kept as:\n{backup}",
+            )
+            self.config = load_config()
         is_first_run = not os.path.exists(CONFIG_PATH)
-        self.config = load_config()
+
         self.audio_engine = AudioEngine()
         self.hotkey_listener = None
+        self._pending_save = None
 
         self.editor_path = None
         self.editor_data = None
         self.editor_samplerate = None
         self._editor_sound_paths = {}
 
+        self.hostapi = self._pick_hostapi(self.config.get("host_api"))
         self.input_devices = self._list_devices(output=False)
         self.output_devices = self._list_devices(output=True)
 
@@ -405,8 +505,12 @@ class Soundboard:
             ("input_device", self.input_devices, False),
             ("output_device", self.output_devices, True),
         ):
-            if is_first_run or isinstance(self.config.get(key), int):
+            stored = self.config.get(key)
+            if is_first_run or isinstance(stored, int):
                 self.config[key] = self._default_device_name(devices, output)
+            else:
+                # Keep an unplugged device's name so it's picked up again later.
+                self.config[key] = self._match_device_name(devices, stored) or stored
         save_config(self.config)
 
         self.tabview = ctk.CTkTabview(
@@ -439,28 +543,67 @@ class Soundboard:
     # -- device listing -----------------------------------------------------
 
     @staticmethod
-    def _list_devices(output):
-        devices = sd.query_devices()
+    def _pick_hostapi(preferred_name=None):
+        """Index of the host API whose devices are shown, or None to show
+        all (non-Windows platforms have one relevant API)."""
+        if sys.platform != "win32":
+            return None
+        names = [api["name"] for api in sd.query_hostapis()]
+        for wanted in (preferred_name,) + WINDOWS_HOSTAPIS:
+            if wanted in names:
+                return names.index(wanted)
+        return None
+
+    def _list_devices(self, output):
         key = "max_output_channels" if output else "max_input_channels"
         entries = [(None, NO_DEVICE_LABEL)]
-        entries += [(i, d["name"]) for i, d in enumerate(devices) if d[key] > 0]
+        for i, d in enumerate(sd.query_devices()):
+            if d[key] > 0 and (self.hostapi is None or d["hostapi"] == self.hostapi):
+                entries.append((i, d["name"]))
         return entries
 
-    @staticmethod
-    def _default_device_name(devices, output):
-        """Mic defaults to the system input. Output prefers a device other
-        than the system output, since that is usually the virtual cable."""
+    def _system_default_device(self, output):
+        try:
+            if self.hostapi is not None:
+                key = "default_output_device" if output else "default_input_device"
+                index = sd.query_hostapis(self.hostapi)[key]
+            else:
+                index = sd.query_devices(kind="output" if output else "input")["index"]
+        except Exception:
+            return None
+        return index if index is not None and index >= 0 else None
+
+    def _default_device_name(self, devices, output):
+        """Mic defaults to the system input. Output prefers a known virtual
+        cable, then any device other than the system output."""
         names = [name for _, name in devices[1:]]
         if not names:
             return None
-        try:
-            system_default = sd.query_devices(kind="output" if output else "input")["name"]
-        except Exception:
-            system_default = None
-        if output:
-            others = [n for n in names if n != system_default]
-            return others[0] if others else names[0]
-        return system_default if system_default in names else names[0]
+        default_index = self._system_default_device(output)
+        default_name = next((n for i, n in devices if i is not None and i == default_index), None)
+        if not output:
+            return default_name or names[0]
+        for name in names:
+            if any(hint in name.lower() for hint in VIRTUAL_CABLE_HINTS):
+                return name
+        others = [n for n in names if n != default_name]
+        return others[0] if others else names[0]
+
+    @staticmethod
+    def _match_device_name(devices, stored):
+        """Find a stored device name in the list. Also matches across
+        Windows APIs, where MME cuts names to 31 characters."""
+        if stored is None:
+            return None
+        names = [n for _, n in devices[1:]]
+        if stored in names:
+            return stored
+        for name in names:
+            if len(stored) == MME_NAME_LENGTH and name.startswith(stored):
+                return name
+            if len(name) == MME_NAME_LENGTH and stored.startswith(name):
+                return name
+        return None
 
     @staticmethod
     def _index_for_name(devices, name):
@@ -529,6 +672,49 @@ class Soundboard:
         self.hear_self_checkbox.configure(command=self._on_toggle_hear_self)
         self.hear_self_checkbox.grid(row=1, column=2, sticky="w", padx=8, pady=8)
 
+        self._add_volume_row(frame, 2, "Mic volume:", "mic_volume", "mic_gain")
+        self._add_volume_row(frame, 3, "Soundboard volume:", "sound_volume", "sound_gain")
+
+    def _add_volume_row(self, frame, row, text, config_key, engine_attr):
+        ctk.CTkLabel(frame, text=text, text_color=COLOR_TEXT).grid(row=row, column=0, sticky="w", padx=8, pady=6)
+        value_label = ctk.CTkLabel(frame, text=f"{self.config[config_key]}%", text_color=COLOR_TEXT, width=50)
+
+        def on_change(value):
+            percent = int(round(value))
+            self.config[config_key] = percent
+            setattr(self.audio_engine, engine_attr, percent / 100)
+            value_label.configure(text=f"{percent}%")
+            self._save_config_soon()
+
+        slider = ctk.CTkSlider(
+            frame, from_=0, to=VOLUME_MAX, number_of_steps=VOLUME_MAX, command=on_change,
+            fg_color=COLOR_ROW, progress_color=COLOR_ORANGE,
+            button_color=COLOR_ORANGE, button_hover_color=COLOR_ORANGE_HOVER,
+        )
+        slider.set(self.config[config_key])
+        slider.grid(row=row, column=1, sticky="ew", padx=8, pady=6)
+        value_label.grid(row=row, column=2, sticky="w", padx=8, pady=6)
+
+    def _save_config_soon(self):
+        # Sliders fire continuously while dragged; write once they settle.
+        if self._pending_save is not None:
+            self.root.after_cancel(self._pending_save)
+        self._pending_save = self.root.after(500, self._flush_config)
+
+    def _flush_config(self):
+        self._pending_save = None
+        save_config(self.config)
+
+    def _refresh_device_menus(self):
+        for menu, var, devices, key in (
+            (self.input_menu, self.input_var, self.input_devices, "input_device"),
+            (self.output_menu, self.output_var, self.output_devices, "output_device"),
+        ):
+            names = [name for _, name in devices]
+            menu.configure(values=names)
+            current = self.config.get(key)
+            var.set(current if current in names else NO_DEVICE_LABEL)
+
     def _on_input_device_change(self, selected_name):
         self.config["input_device"] = None if selected_name == NO_DEVICE_LABEL else selected_name
         save_config(self.config)
@@ -545,26 +731,51 @@ class Soundboard:
         save_config(self.config)
         self.audio_engine.set_monitor_muted(not hear)
 
-    @staticmethod
-    def _default_output_device():
-        try:
-            return sd.query_devices(kind="output")["index"]
-        except Exception:
-            return None
-
-    def _restart_audio_engine(self):
+    def _start_audio_engine(self):
         # Local copy goes to the system default output, unless that is
         # already the selected output (it would play twice).
         input_device = self._index_for_name(self.input_devices, self.config.get("input_device"))
         output_device = self._index_for_name(self.output_devices, self.config.get("output_device"))
-        monitor_device = self._default_output_device()
+        monitor_device = self._system_default_device(output=True)
         if monitor_device == output_device:
             monitor_device = None
+        self.audio_engine.mic_gain = self.config["mic_volume"] / 100
+        self.audio_engine.sound_gain = self.config["sound_volume"] / 100
+        self.audio_engine.start(input_device, output_device, monitor_device)
+        self.audio_engine.set_monitor_muted(not self.config.get("hear_self", True))
+
+    def _restart_audio_engine(self):
         try:
-            self.audio_engine.start(input_device, output_device, monitor_device)
-            self.audio_engine.set_monitor_muted(not self.config.get("hear_self", True))
+            self._start_audio_engine()
+            return
         except Exception as e:
-            messagebox.showerror("Audio device error", str(e))
+            error = e
+        if self._fallback_to_mme():
+            try:
+                self._start_audio_engine()
+                save_config(self.config)
+                return
+            except Exception as e:
+                error = e
+        messagebox.showerror("Audio device error", str(error))
+
+    def _fallback_to_mme(self):
+        """If a WASAPI device failed to open, switch the device lists to
+        MME (older, but accepts any sample rate) and remember that."""
+        if self.hostapi is None:
+            return False
+        names = [api["name"] for api in sd.query_hostapis()]
+        if names[self.hostapi] != "Windows WASAPI" or "MME" not in names:
+            return False
+        self.hostapi = names.index("MME")
+        self.config["host_api"] = "MME"
+        self.input_devices = self._list_devices(output=False)
+        self.output_devices = self._list_devices(output=True)
+        for key, devices in (("input_device", self.input_devices), ("output_device", self.output_devices)):
+            stored = self.config.get(key)
+            self.config[key] = self._match_device_name(devices, stored) or stored
+        self._refresh_device_menus()
+        return True
 
     # -- sound list -----------------------------------------------------
 
@@ -603,7 +814,10 @@ class Soundboard:
             checkbox.pack(side="left", padx=(8, 4))
 
             missing = not os.path.exists(resolved_path)
-            label_text = f"{sound['name']}  [{sound.get('hotkey') or 'no hotkey'}]"
+            name = sound["name"]
+            if len(name) > 40:  # long titles would push the buttons out of the row
+                name = name[:37] + "..."
+            label_text = f"{name}  [{sound.get('hotkey') or 'no hotkey'}]"
             if missing:
                 label_text += "  (file missing)"
             ctk.CTkLabel(
@@ -613,9 +827,20 @@ class Soundboard:
                 text_color=COLOR_ERROR if missing else COLOR_TEXT,
             ).pack(side="left", fill="x", expand=True, padx=4)
 
+            volume_label = ctk.CTkLabel(row, text=f"{sound['volume']}%", width=42, text_color=COLOR_TEXT_DIM)
+            volume_slider = ctk.CTkSlider(
+                row, from_=0, to=VOLUME_MAX, number_of_steps=VOLUME_MAX, width=100,
+                command=lambda value, s=sound, lbl=volume_label: self._on_sound_volume(s, lbl, value),
+                fg_color=COLOR_SURFACE, progress_color=COLOR_ORANGE,
+                button_color=COLOR_ORANGE, button_hover_color=COLOR_ORANGE_HOVER,
+            )
+            volume_slider.set(sound["volume"])
+            volume_slider.pack(side="left", padx=(3, 0))
+            volume_label.pack(side="left", padx=(0, 3))
+
             ctk.CTkButton(
                 row, text="Play", width=60,
-                command=lambda p=resolved_path: self.play_sound(p),
+                command=lambda s=sound: self.play_sound(s),
                 fg_color=COLOR_ORANGE, hover_color=COLOR_ORANGE_HOVER, text_color=COLOR_BG,
             ).pack(side="left", padx=3)
             ctk.CTkButton(
@@ -639,6 +864,11 @@ class Soundboard:
         save_config(self.config)
         self._apply_hotkeys()
 
+    def _on_sound_volume(self, sound, label, value):
+        sound["volume"] = int(round(value))
+        label.configure(text=f"{sound['volume']}%")
+        self._save_config_soon()
+
     def _build_controls(self, parent):
         frame = ctk.CTkFrame(parent, fg_color=COLOR_BG)
         frame.pack(fill="x", padx=4, pady=(6, 4))
@@ -646,6 +876,17 @@ class Soundboard:
             frame, text="Add sound", command=self.add_sound,
             fg_color=COLOR_ORANGE, hover_color=COLOR_ORANGE_HOVER, text_color=COLOR_BG,
         ).pack(side="left")
+        ctk.CTkButton(
+            frame, text="Stop all", command=self.audio_engine.stop_all,
+            fg_color=COLOR_ERROR, hover_color="#cc4444", text_color=COLOR_BG,
+        ).pack(side="left", padx=(8, 0))
+        self.stop_hotkey_button = ctk.CTkButton(
+            frame, text="", command=self.set_stop_hotkey,
+            fg_color=COLOR_ROW, hover_color=COLOR_SURFACE, text_color=COLOR_ORANGE,
+            border_width=1, border_color=COLOR_ORANGE,
+        )
+        self.stop_hotkey_button.pack(side="left", padx=(8, 0))
+        self._update_stop_hotkey_button()
         self.dropout_label = ctk.CTkLabel(frame, text="", text_color=COLOR_TEXT_DIM)
         self.dropout_label.pack(side="right")
         self._update_dropout_label()
@@ -679,7 +920,12 @@ class Soundboard:
             return
         stored_path = self._import_into_sounds_dir(path)
         name = os.path.splitext(os.path.basename(path))[0]
-        self.config["sounds"].append({"name": name, "path": stored_path, "hotkey": None, "enabled": True})
+        self._add_sound_entry(name, stored_path)
+
+    def _add_sound_entry(self, name, stored_path):
+        self.config["sounds"].append(
+            {"name": name, "path": stored_path, "hotkey": None, "enabled": True, "volume": 100}
+        )
         save_config(self.config)
         self._refresh_sound_list()
 
@@ -690,24 +936,68 @@ class Soundboard:
         self._apply_hotkeys()
 
     def set_hotkey(self, index):
+        sound = self.config["sounds"][index]
+        hotkey = self._ask_hotkey("Set hotkey", sound.get("hotkey"), owner=sound)
+        if hotkey is None:
+            return
+        sound["hotkey"] = hotkey or None
+        save_config(self.config)
+        self._refresh_sound_list()
+        self._apply_hotkeys()
+
+    def set_stop_hotkey(self):
+        hotkey = self._ask_hotkey("Stop all hotkey", self.config.get("stop_hotkey"), owner="stop")
+        if hotkey is None:
+            return
+        self.config["stop_hotkey"] = hotkey or None
+        save_config(self.config)
+        self._update_stop_hotkey_button()
+        self._apply_hotkeys()
+
+    def _update_stop_hotkey_button(self):
+        hotkey = self.config.get("stop_hotkey")
+        self.stop_hotkey_button.configure(text=f"Stop hotkey: {hotkey}" if hotkey else "Set stop hotkey")
+
+    def _ask_hotkey(self, title, current, owner):
+        """Returns the new hotkey, "" to clear it, or None if cancelled or
+        invalid. `owner` is the sound dict or "stop" being edited."""
         dialog = ctk.CTkInputDialog(
-            text="Enter hotkey (e.g. <ctrl>+<alt>+1), leave blank to clear:",
-            title="Set hotkey",
+            text=f"Enter hotkey (e.g. <ctrl>+<alt>+1), leave blank to clear.\nCurrent: {current or 'none'}",
+            title=title,
         )
         hotkey = dialog.get_input()
         if hotkey is None:
-            return
+            return None
         hotkey = hotkey.strip()
-        if hotkey and not self._is_valid_hotkey(hotkey):
+        if not hotkey:
+            return ""
+        if not self._is_valid_hotkey(hotkey):
             messagebox.showerror(
                 "Invalid hotkey",
                 f"'{hotkey}' is not a valid hotkey. Use a format like <ctrl>+<alt>+1.",
             )
-            return
-        self.config["sounds"][index]["hotkey"] = hotkey or None
-        save_config(self.config)
-        self._refresh_sound_list()
-        self._apply_hotkeys()
+            return None
+        other = self._hotkey_owner(hotkey, skip=owner)
+        if other is not None:
+            messagebox.showerror("Hotkey in use", f"'{hotkey}' is already used by {other}.")
+            return None
+        return hotkey
+
+    def _hotkey_owner(self, hotkey, skip):
+        keys = self._hotkey_keys(hotkey)
+        candidates = [("stop", "Stop all", self.config.get("stop_hotkey"))]
+        candidates += [(s, f"'{s['name']}'", s.get("hotkey")) for s in self.config["sounds"]]
+        for obj, label, other in candidates:
+            if obj is not skip and other and self._hotkey_keys(other) == keys:
+                return label
+        return None
+
+    @staticmethod
+    def _hotkey_keys(hotkey):
+        try:
+            return frozenset(pynkeyboard.HotKey.parse(hotkey))
+        except ValueError:
+            return None
 
     @staticmethod
     def _is_valid_hotkey(hotkey):
@@ -719,9 +1009,10 @@ class Soundboard:
 
     # -- playback -----------------------------------------------------------
 
-    def play_sound(self, path):
+    def play_sound(self, sound):
+        path = resolve_sound_path(sound["path"])
         try:
-            self.audio_engine.play(path)
+            self.audio_engine.play(path, gain=sound.get("volume", 100) / 100)
         except Exception as e:
             self.root.after(0, lambda: messagebox.showerror("Playback error", str(e)))
 
@@ -738,8 +1029,10 @@ class Soundboard:
                 continue
             hotkey = sound.get("hotkey")
             if hotkey and self._is_valid_hotkey(hotkey):
-                resolved_path = resolve_sound_path(sound["path"])
-                mapping[hotkey] = (lambda p=resolved_path: self.play_sound(p))
+                mapping[hotkey] = (lambda s=sound: self.play_sound(s))
+        stop_hotkey = self.config.get("stop_hotkey")
+        if stop_hotkey and self._is_valid_hotkey(stop_hotkey):
+            mapping[stop_hotkey] = self.audio_engine.stop_all
 
         if mapping:
             try:
@@ -832,11 +1125,7 @@ class Soundboard:
         self.download_button.configure(state="normal")
         self.download_url_entry.delete(0, "end")
         self.download_status.configure(text=f"Saved: {os.path.basename(path)}", text_color=COLOR_ORANGE)
-        self.config["sounds"].append({
-            "name": title, "path": os.path.basename(path), "hotkey": None, "enabled": True,
-        })
-        save_config(self.config)
-        self._refresh_sound_list()
+        self._add_sound_entry(title, os.path.basename(path))
 
     # -- sound editor tab -----------------------------------------------
 
@@ -1048,33 +1337,81 @@ class Soundboard:
         except Exception as e:
             messagebox.showerror("Save error", str(e))
             return
-        self.config["sounds"].append({
-            "name": name, "path": os.path.basename(dest), "hotkey": None, "enabled": True,
-        })
-        save_config(self.config)
-        self._refresh_sound_list()
+        self._add_sound_entry(name, os.path.basename(dest))
         messagebox.showinfo("Saved", f"Saved and added to your board as '{name}'.")
 
     # -- lifecycle ------------------------------------------------------
 
     def _on_close(self):
+        if self._pending_save is not None:
+            self.root.after_cancel(self._pending_save)
+            self._flush_config()
         self.audio_engine.stop()
         if self.hotkey_listener is not None:
             self.hotkey_listener.stop()
         self.root.destroy()
 
 
-def main():
-    ctk.set_appearance_mode("dark")
-    ctk.set_default_color_theme("dark-blue")
-    root = ctk.CTk()
-    root.geometry("640x640")
-    root.minsize(520, 480)
+def _report_callback_exception(exc_type, exc_value, exc_tb):
+    """Windowed builds have no console, so show UI errors instead of
+    losing them."""
+    text = "".join(traceback.format_exception(exc_type, exc_value, exc_tb))
+    log_path = write_error_log(text)
+    details = f"\n\nDetails were saved to:\n{log_path}" if log_path else ""
+    messagebox.showerror("Unexpected error", f"{exc_value}{details}")
+
+
+def _show_startup_error(root):
+    text = traceback.format_exc()
+    log_path = write_error_log(text)
+    error = sys.exc_info()[1]
+    message = f"Soundboard could not start:\n\n{error}"
+    if isinstance(error, PermissionError):
+        message += (
+            "\n\nSoundboard saves its settings and sounds next to the app. "
+            "Move it to a folder you can write to, such as Documents."
+        )
+    if log_path:
+        message += f"\n\nDetails were saved to:\n{log_path}"
     try:
-        root.iconphoto(True, tk.PhotoImage(file=ICON_PATH))
-    except tk.TclError:
+        if root is None:
+            root = tk.Tk()
+        root.withdraw()
+        messagebox.showerror("Soundboard", message, parent=root)
+        root.destroy()
+    except Exception:
         pass
-    Soundboard(root)
+
+
+def _fit_to_screen(root):
+    try:
+        if sys.platform.startswith("linux"):
+            root.attributes("-zoomed", True)
+        else:
+            root.state("zoomed")
+    except tk.TclError:
+        root.geometry(f"{root.winfo_screenwidth()}x{root.winfo_screenheight()}+0+0")
+
+
+def main():
+    root = None
+    try:
+        ctk.set_appearance_mode("dark")
+        ctk.set_default_color_theme("dark-blue")
+        root = ctk.CTk()
+        root.report_callback_exception = _report_callback_exception
+        root.geometry("900x700")
+        root.minsize(640, 480)
+        try:
+            root.iconphoto(True, tk.PhotoImage(file=ICON_PATH))
+        except tk.TclError:
+            pass
+        Soundboard(root)
+        # CustomTkinter applies its own geometry after startup, so maximize afterwards.
+        root.after(100, lambda: _fit_to_screen(root))
+    except Exception:
+        _show_startup_error(root)
+        return
     root.mainloop()
 
 
