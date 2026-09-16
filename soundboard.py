@@ -12,6 +12,7 @@ first run. Sound files live in the Sounds/ folder next to this script.
 """
 
 import collections
+import filecmp
 import json
 import os
 import queue
@@ -109,6 +110,11 @@ def resolve_sound_path(path):
 def sanitize_filename(name):
     name = re.sub(r'[\\/:*?"<>|]', "_", name).strip()
     return name or "sound"
+
+
+def same_file(a, b):
+    """Path comparison that ignores case on Windows and resolves links."""
+    return os.path.normcase(os.path.realpath(a)) == os.path.normcase(os.path.realpath(b))
 
 
 def unique_path(path):
@@ -1111,11 +1117,14 @@ class Soundboard:
         """Copy an external file into Sounds/ (unless it's already there)
         and return the bare filename to store in config."""
         source_path = os.path.abspath(source_path)
-        if os.path.dirname(source_path) == SOUNDS_DIR:
+        if same_file(os.path.dirname(source_path), SOUNDS_DIR):
             return os.path.basename(source_path)
         ensure_sounds_dir()
         filename = sanitize_filename(os.path.basename(source_path))
-        dest = unique_path(os.path.join(SOUNDS_DIR, filename))
+        candidate = os.path.join(SOUNDS_DIR, filename)
+        if os.path.isfile(candidate) and filecmp.cmp(source_path, candidate, shallow=False):
+            return filename  # same file was imported before
+        dest = unique_path(candidate)
         shutil.copy2(source_path, dest)
         return os.path.basename(dest)
 
@@ -1127,8 +1136,19 @@ class Soundboard:
         if not path:
             return
         stored_path = self._import_into_sounds_dir(path)
+        existing = self._find_sound(resolve_sound_path(stored_path))
+        if existing is not None:
+            messagebox.showinfo("Already added", f"This file is already on your board as '{existing['name']}'.")
+            return
         name = os.path.splitext(os.path.basename(path))[0]
         self._add_sound_entry(name, stored_path)
+
+    def _find_sound(self, path):
+        """The board entry that plays this file, if any."""
+        for sound in self.config["sounds"]:
+            if same_file(resolve_sound_path(sound["path"]), path):
+                return sound
+        return None
 
     def _add_sound_entry(self, name, stored_path):
         self.config["sounds"].append(
@@ -1138,10 +1158,34 @@ class Soundboard:
         self._refresh_sound_list()
 
     def remove_sound(self, index):
+        sound = self.config["sounds"][index]
+        path = resolve_sound_path(sound["path"])
+        shared = any(
+            same_file(resolve_sound_path(other["path"]), path)
+            for i, other in enumerate(self.config["sounds"]) if i != index
+        )
+        # Only offer to delete files the app owns that nothing else uses.
+        delete_file = False
+        if not shared and os.path.isfile(path) and same_file(os.path.dirname(path), SOUNDS_DIR):
+            answer = messagebox.askyesnocancel(
+                "Remove sound",
+                f"Remove '{sound['name']}' from the board?\n\n"
+                f"Yes: also delete {os.path.basename(path)} from the Sounds folder.\n"
+                "No: keep the file.",
+            )
+            if answer is None:
+                return
+            delete_file = answer
+        self.audio_engine.stop_key(os.path.abspath(path))
         del self.config["sounds"][index]
         save_config(self.config)
         self._refresh_sound_list()
         self._apply_hotkeys()
+        if delete_file:
+            try:
+                os.remove(path)
+            except OSError as e:
+                messagebox.showerror("Could not delete file", str(e))
 
     def set_hotkey(self, index):
         sound = self.config["sounds"][index]
@@ -1302,7 +1346,9 @@ class Soundboard:
         try:
             ensure_sounds_dir()
             ffmpeg_path = imageio_ffmpeg.get_ffmpeg_exe()
-            outtmpl = os.path.join(SOUNDS_DIR, "%(title).100s.%(ext)s")
+            # The id keeps different videos with the same title apart; yt-dlp
+            # would otherwise reuse the existing file.
+            outtmpl = os.path.join(SOUNDS_DIR, "%(title).100s [%(id)s].%(ext)s")
             ydl_opts = {
                 "format": "bestaudio/best",
                 "outtmpl": outtmpl,
@@ -1333,6 +1379,12 @@ class Soundboard:
     def _on_download_done(self, path, title):
         self.download_button.configure(state="normal")
         self.download_url_entry.delete(0, "end")
+        existing = self._find_sound(path)
+        if existing is not None:
+            self.download_status.configure(
+                text=f"Already on your board as '{existing['name']}'.", text_color=COLOR_ORANGE
+            )
+            return
         self.download_status.configure(text=f"Saved: {os.path.basename(path)}", text_color=COLOR_ORANGE)
         self._add_sound_entry(title, os.path.basename(path))
 

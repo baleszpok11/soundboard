@@ -138,7 +138,10 @@ too; if so, leave it off.
 - "Hotkey" to assign a global hotkey (e.g. `<ctrl>+<alt>+1`) that plays it
   from anywhere, even while the app is unfocused.
 - "Play" to trigger a sound manually (works even if it's unchecked).
-- "Remove" to delete a sound from the board.
+- "Remove" takes a sound off the board and stops it if it's playing. For
+  files in `Sounds/`, it asks whether to delete the file too.
+- Adding or downloading something that's already on the board doesn't
+  create a second entry.
 - A sound listed in red with "(file missing)" points at a file that's
   been moved or deleted since it was added.
 - Playing a sound that's already playing restarts it from the beginning.
@@ -157,7 +160,8 @@ too; if so, leave it off.
   Soundboard is your real mic, not `CABLE Output` or `Stereo Mix`. The
   app shows a red warning when it detects either problem.
 - **Download tab:** paste a video/clip URL and click "Download as MP3".
-  The audio is saved into `Sounds/` and added to the board. Only download
+  The audio is saved into `Sounds/` (the file name includes the video's
+  ID) and added to the board. Only download
   content you have the right to use; downloading may be against the
   source site's terms of service.
 - **Sound Editor tab:** pick a sound (or browse for any file), drag the
