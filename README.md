@@ -73,9 +73,21 @@ pyinstaller --onefile --windowed soundboard.py
 ```
 
 The executable is written to `dist/`. Build on each target OS to get a
-native executable for it (PyInstaller does not cross-compile). Pre-built
-Windows, macOS, and Linux executables are also produced automatically by
-CI on tagged releases — see `.github/workflows/build.yml`.
+native executable for it (PyInstaller does not cross-compile).
+
+### Downloading a pre-built release
+
+Pushing a version tag builds Windows, macOS, and Linux executables in CI
+and publishes them as downloadable zips on the repo's GitHub Release page
+(no need to check out the code or run Python):
+
+```
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+See `.github/workflows/build.yml`. Note: the repo must be public (or the
+downloader needs read access) for others to reach the Releases page.
 
 ## Notes
 
