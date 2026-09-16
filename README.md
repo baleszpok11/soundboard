@@ -193,7 +193,7 @@ COLLECT="--collect-data customtkinter --collect-all yt_dlp --collect-all imageio
 pyinstaller --onefile --windowed --icon assets/icon.ico --add-data "assets/icon.png;assets" $COLLECT soundboard.py
 
 # macOS
-pyinstaller --onefile --windowed --icon assets/icon.icns --add-data "assets/icon.png:assets" $COLLECT soundboard.py
+pyinstaller --onedir --windowed --icon assets/icon.icns --add-data "assets/icon.png:assets" $COLLECT soundboard.py
 plutil -insert NSMicrophoneUsageDescription -string "Soundboard uses your microphone." dist/soundboard.app/Contents/Info.plist
 codesign --force --deep -s - dist/soundboard.app
 
@@ -201,7 +201,9 @@ codesign --force --deep -s - dist/soundboard.app
 pyinstaller --onefile --windowed --add-data "assets/icon.png:assets" $COLLECT soundboard.py
 ```
 
-The executable is written to `dist/`. Build on each target OS to get a
+The executable is written to `dist/`. On macOS, build with `--onedir`:
+a single-file `.app` doesn't open reliably and can't be allowed under
+Input Monitoring. Build on each target OS to get a
 native executable for it (PyInstaller does not cross-compile). The
 `--collect-*` flags bundle CustomTkinter's theme files, yt-dlp's site
 extractors and a portable ffmpeg. On macOS, the `plutil` line is required

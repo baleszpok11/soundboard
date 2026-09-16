@@ -31,7 +31,8 @@ others hear. Tabs: Soundboard, Download (yt-dlp to MP3), Sound Editor
   to soundboard_error.log; config writes are atomic
 - JSON file for config (no database); devices stored by name, sounds by
   filename relative to Sounds/
-- PyInstaller (standalone executables), built via GitHub Actions CI; needs
+- PyInstaller (standalone executables; onefile on Windows/Linux, onedir
+  .app on macOS), built via GitHub Actions CI; needs
   --collect-data customtkinter --collect-all yt_dlp --collect-all
   imageio_ffmpeg, plus NSMicrophoneUsageDescription on macOS
 - macOS dev: use Homebrew python@3.12 + python-tk@3.12 (Apple's CLT
