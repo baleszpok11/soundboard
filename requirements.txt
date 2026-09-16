@@ -1,3 +1,5 @@
 sounddevice
 soundfile
 pynput
+customtkinter
+numpy

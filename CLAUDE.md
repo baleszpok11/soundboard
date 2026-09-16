@@ -1,13 +1,16 @@
 # Soundboard
 
 Open-source cross-platform (Windows, macOS, Linux) soundboard in Python.
-Plays audio files to a chosen output device (virtual audio cable) so
-sounds can be picked up as a microphone in Discord/games.
+Continuously mixes microphone input with triggered sound clips and sends
+the result to a chosen output device (virtual audio cable) so voice and
+sounds are picked up together as one microphone in Discord/games.
 
 ## Stack
-- Python, tkinter (GUI)
-- sounddevice + soundfile (playback)
-- pynput (global hotkeys, cross-platform)
+- Python, CustomTkinter (GUI, orange/black theme)
+- sounddevice (input/output streams) + soundfile (decoding) + numpy
+  (real-time mixing of mic input and sound clips, simple linear-interp
+  resampling to a fixed 48kHz/stereo pipeline)
+- pynput (global hotkeys, cross-platform, format like `<ctrl>+<alt>+1`)
 - JSON file for config (no database)
 - PyInstaller (standalone executables), built via GitHub Actions CI
 

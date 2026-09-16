@@ -1,15 +1,20 @@
 # Soundboard
 
-Open-source, cross-platform (Windows, macOS, Linux) soundboard. Plays
-audio files to a chosen output device — typically a virtual audio cable —
-so your sounds get picked up as a microphone input in Discord, games, or
-any other voice app.
+Open-source, cross-platform (Windows, macOS, Linux) soundboard. Continuously
+mixes your microphone with triggered sound clips and sends the combined
+audio to a chosen output device — typically a virtual audio cable — so
+your voice and your sounds reach Discord, games, or any other voice app
+together, from one virtual microphone.
 
 ## Features
 
 - Assign any audio file (wav, flac, ogg, mp3) to a button
 - Play sounds on click or via a global hotkey, even while unfocused
-- Choose which output device sounds are routed to
+- Enable/disable each sound's hotkey independently with a checkbox,
+  without removing it from the board
+- Mixes your real microphone with soundboard clips in real time, so
+  people hear both at once — no separate mixer app needed
+- Choose which microphone (input) and which virtual cable (output) are used
 - Settings persist automatically between runs
 - Runs from source (Python) or as a standalone executable — no Python
   required on the machine you run it on
@@ -26,8 +31,7 @@ Linux builds are published automatically for each tagged version (see
 
 Requirements: Python 3.9+.
 
-1. Set up a virtual audio device for your OS (see below) so it can be
-   selected both here and as your microphone in Discord/games.
+1. Set up a virtual audio device for your OS (see below).
 2. Install dependencies:
 
    ```
@@ -42,19 +46,15 @@ Requirements: Python 3.9+.
 
 ### Virtual audio device by platform
 
+The app mixes your microphone and your sound clips itself, so you only
+need a virtual cable to carry that combined audio into Discord/games —
+no separate OS-level mixer or loopback routing is required.
+
 **Windows** — install [VB-CABLE](https://vb-audio.com/Cable/) (free) or the
 open-source [VirtualAudioCable by frgnca](https://github.com/frgnca/VirtualAudioCable).
-Select the cable's input as the output device here, and its output as your
-microphone in Discord/games. To also send your real mic through, use your
-OS's "listen to this device" / an audio mixer to combine your microphone
-and the soundboard into the same cable input, or use a tool like Voicemeeter.
 
 **macOS** — install [BlackHole](https://github.com/ExistentialAudio/BlackHole)
-(free, open-source). Select BlackHole as the output device here, and as
-the microphone in Discord/games. To mix your real mic with the soundboard,
-create a Multi-Output Device and an Aggregate Device in Audio MIDI Setup
-combining your microphone and BlackHole, or use BlackHole's companion app
-[Loopback](https://rogueamoeba.com/loopback/) (paid) / a free routing app.
+(free, open-source).
 
 **Linux** — no install needed; PulseAudio/PipeWire can create a null sink:
 
@@ -62,25 +62,28 @@ combining your microphone and BlackHole, or use BlackHole's companion app
 pactl load-module module-null-sink sink_name=soundboard sink_properties=device.description=Soundboard
 ```
 
-Select "Soundboard" (monitor) as the output device here, and as the
-microphone in Discord/games. To mix in your real mic, combine both sources
-into the sink with:
+(use `pavucontrol` for a GUI alternative to the CLI command above.)
 
-```
-pactl load-module module-loopback source=<your-mic-source> sink=soundboard
-```
-
-(list sources with `pactl list short sources`). Use `pavucontrol` for a
-GUI to manage inputs/outputs instead of the CLI commands above.
+In all three cases: pick your real microphone as the **input** device and
+the virtual cable as the **output** device in Soundboard, then select the
+virtual cable as your microphone in Discord/games.
 
 ## Usage
 
-- Pick the output device from the dropdown (your virtual cable's input).
+- **Microphone (input):** your real microphone — this is what gets mixed
+  with sound clips and sent onward.
+- **Virtual mic output:** the virtual cable that Discord/games should use
+  as their microphone input. Pick `(none)` to disable a side if you don't
+  need it (e.g. no mic passthrough).
 - "Add sound" to pick an audio file (wav, flac, ogg, mp3).
+- The checkbox next to each sound toggles it on/off — unchecked sounds
+  keep their hotkey assignment but won't respond to it until re-enabled.
 - "Hotkey" to assign a global hotkey (e.g. `<ctrl>+<alt>+1`) that plays it
   from anywhere, even while the app is unfocused.
-- "Play" to trigger a sound manually.
+- "Play" to trigger a sound manually (works even if it's unchecked).
 - "Remove" to delete a sound from the board.
+- A sound listed in red with "(file missing)" points at a file that's
+  been moved or deleted since it was added.
 - Settings are saved automatically to `soundboard_config.json`, next to
   the script (or next to the executable, when run as a build).
 
@@ -112,12 +115,16 @@ downloader needs read access) for others to reach the Releases page.
 
 ## Notes
 
+- Audio is mixed at a fixed 48000 Hz, stereo. If a device doesn't support
+  that, opening it will show an error — pick a different device or check
+  its properties in your OS's sound settings.
 - Global hotkeys are handled via `pynput`. On Linux with Wayland, global
   hotkey capture may not work depending on your compositor (X11 works).
   On macOS, grant Accessibility permissions to your terminal/app when
   prompted for hotkeys to register.
-- In Discord, set your input device to the virtual cable's output/monitor
-  side so played sounds come through as your mic.
+- Sound files are referenced by their absolute path in
+  `soundboard_config.json`; moving or renaming a sound file after adding
+  it will show it as missing in the list.
 
 ## License
 
