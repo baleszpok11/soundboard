@@ -1,21 +1,40 @@
 # Soundboard
 
-Open-source cross-platform (Windows, macOS, Linux) soundboard. Plays audio
-files to a chosen output device (e.g. a virtual audio cable) so sounds can
-be picked up as a microphone in Discord/games.
+Open-source, cross-platform (Windows, macOS, Linux) soundboard. Plays
+audio files to a chosen output device — typically a virtual audio cable —
+so your sounds get picked up as a microphone input in Discord, games, or
+any other voice app.
 
-## Setup
+## Features
+
+- Assign any audio file (wav, flac, ogg, mp3) to a button
+- Play sounds on click or via a global hotkey, even while unfocused
+- Choose which output device sounds are routed to
+- Settings persist automatically between runs
+- Runs from source (Python) or as a standalone executable — no Python
+  required on the machine you run it on
+- 100% free and open-source, no paywalled dependencies or services
+
+## Download
+
+Grab a pre-built executable from the [Releases](../../releases) page —
+no Python or setup required, just download and run. Windows, macOS, and
+Linux builds are published automatically for each tagged version (see
+[Building a standalone executable](#building-a-standalone-executable)).
+
+## Running from source
+
+Requirements: Python 3.9+.
 
 1. Set up a virtual audio device for your OS (see below) so it can be
    selected both here and as your microphone in Discord/games.
-2. Install Python 3.
-3. Install dependencies:
+2. Install dependencies:
 
    ```
    pip install -r requirements.txt
    ```
 
-4. Run:
+3. Run:
 
    ```
    python soundboard.py
@@ -61,7 +80,9 @@ GUI to manage inputs/outputs instead of the CLI commands above.
 - "Hotkey" to assign a global hotkey (e.g. `<ctrl>+<alt>+1`) that plays it
   from anywhere, even while the app is unfocused.
 - "Play" to trigger a sound manually.
-- Settings are saved automatically to `soundboard_config.json`.
+- "Remove" to delete a sound from the board.
+- Settings are saved automatically to `soundboard_config.json`, next to
+  the script (or next to the executable, when run as a build).
 
 ## Building a standalone executable
 
@@ -75,11 +96,11 @@ pyinstaller --onefile --windowed soundboard.py
 The executable is written to `dist/`. Build on each target OS to get a
 native executable for it (PyInstaller does not cross-compile).
 
-### Downloading a pre-built release
+### Publishing a release
 
 Pushing a version tag builds Windows, macOS, and Linux executables in CI
-and publishes them as downloadable zips on the repo's GitHub Release page
-(no need to check out the code or run Python):
+and publishes them as downloadable zips on the repo's [Releases](../../releases)
+page (no need to check out the code or run Python):
 
 ```
 git tag v0.1.0
@@ -97,3 +118,7 @@ downloader needs read access) for others to reach the Releases page.
   prompted for hotkeys to register.
 - In Discord, set your input device to the virtual cable's output/monitor
   side so played sounds come through as your mic.
+
+## License
+
+[MIT](LICENSE)
