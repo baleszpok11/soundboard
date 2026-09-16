@@ -13,12 +13,14 @@ first run. Sound files live in the Sounds/ folder next to this script.
 
 import collections
 import datetime
+import contextlib
 import filecmp
 import json
 import os
 import queue
 import re
 import shutil
+import subprocess
 import sys
 import tempfile
 import threading
@@ -125,6 +127,49 @@ def downloader_age_days():
     except ValueError:
         return None
     return (datetime.date.today() - released).days
+def hotkey_permission_granted():
+    """False when macOS will silently block global hotkeys because the app
+    has neither Input Monitoring nor Accessibility permission."""
+    if sys.platform != "darwin":
+        return True
+    try:
+        import HIServices
+        import Quartz
+        return bool(HIServices.AXIsProcessTrusted() or Quartz.CGPreflightListenEventAccess())
+    except Exception:
+        return True
+
+
+def request_hotkey_permission():
+    """Ask macOS to show its Input Monitoring prompt (only shown once)."""
+    try:
+        import Quartz
+        Quartz.CGRequestListenEventAccess()
+    except Exception:
+        pass
+
+
+def pin_macos_keyboard_layout():
+    """pynput reads the keyboard layout when its listener thread starts,
+    but current macOS only allows that on the main thread and kills the
+    process otherwise. Read it here (call from the main thread) and give
+    pynput the cached value."""
+    if sys.platform != "darwin":
+        return
+    from pynput._util import darwin as darwin_util
+    from pynput.keyboard import _darwin as darwin_keyboard
+
+    with darwin_util.keycode_context() as context:
+        pass
+
+    @contextlib.contextmanager
+    def cached_context():
+        yield context
+
+    darwin_keyboard.keycode_context = cached_context
+
+
+MACOS_INPUT_MONITORING_URL = "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent"
 
 
 def same_file(a, b):
@@ -664,6 +709,23 @@ class Soundboard:
         self.loop_warning = ctk.CTkLabel(
             warning_holder, text="", text_color=COLOR_ERROR, justify="left", anchor="w", wraplength=800,
         )
+        self.permission_warning = ctk.CTkFrame(warning_holder, fg_color=COLOR_BG)
+        ctk.CTkLabel(
+            self.permission_warning,
+            text=(
+                "macOS is blocking your hotkeys. Allow Soundboard (or your terminal, when running "
+                "from source) under Privacy & Security > Input Monitoring, then restart Soundboard."
+            ),
+            text_color=COLOR_ERROR, justify="left", anchor="w", wraplength=650,
+        ).pack(side="left", padx=(8, 8))
+        ctk.CTkButton(
+            self.permission_warning, text="Open settings", width=110,
+            command=lambda: subprocess.run(["open", MACOS_INPUT_MONITORING_URL]),
+            fg_color=COLOR_ROW, hover_color=COLOR_SURFACE, text_color=COLOR_ORANGE,
+            border_width=1, border_color=COLOR_ORANGE,
+        ).pack(side="left")
+        self._hotkeys_allowed = True
+        self._permission_requested = False
         self._build_sound_list(board_tab)
         self._build_controls(board_tab)
 
@@ -1100,6 +1162,7 @@ class Soundboard:
         self.dropout_label.configure(text=f"Audio dropouts: {count}" if count else "")
         self._watch_output()
         self._update_device_warnings()
+        self._update_hotkey_permission()
         self.root.after(1000, self._update_dropout_label)
 
     def _watch_output(self):
@@ -1304,10 +1367,32 @@ class Soundboard:
 
         if mapping:
             try:
+                pin_macos_keyboard_layout()
                 self.hotkey_listener = pynkeyboard.GlobalHotKeys(mapping)
                 self.hotkey_listener.start()
             except Exception as e:
                 messagebox.showwarning("Hotkey error", f"Could not register hotkeys: {e}")
+        if hasattr(self, "permission_warning"):
+            self._update_hotkey_permission()
+
+    def _update_hotkey_permission(self):
+        """Show the macOS permission warning while hotkeys are set but
+        blocked, and re-register them once permission is granted."""
+        if self.hotkey_listener is None:
+            allowed = True  # no hotkeys, nothing to warn about
+        else:
+            allowed = hotkey_permission_granted()
+        if allowed == self._hotkeys_allowed:
+            return
+        self._hotkeys_allowed = allowed
+        if allowed:
+            self.permission_warning.pack_forget()
+            self._apply_hotkeys()
+            return
+        self.permission_warning.pack(fill="x", pady=(4, 0))
+        if not self._permission_requested:
+            self._permission_requested = True
+            request_hotkey_permission()
 
     # -- download tab -------------------------------------------------------
 
