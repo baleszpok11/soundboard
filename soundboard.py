@@ -139,10 +139,24 @@ class Soundboard:
         if hotkey is None:
             return
         hotkey = hotkey.strip()
+        if hotkey and not self._is_valid_hotkey(hotkey):
+            messagebox.showerror(
+                "Invalid hotkey",
+                f"'{hotkey}' is not a valid hotkey. Use a format like <ctrl>+<alt>+1.",
+            )
+            return
         self.config["sounds"][index]["hotkey"] = hotkey or None
         save_config(self.config)
         self._refresh_sound_list()
         self._apply_hotkeys()
+
+    @staticmethod
+    def _is_valid_hotkey(hotkey):
+        try:
+            pynkeyboard.GlobalHotKeys({hotkey: lambda: None})
+        except ValueError:
+            return False
+        return True
 
     # -- playback -----------------------------------------------------------
 
@@ -168,7 +182,7 @@ class Soundboard:
         mapping = {}
         for sound in self.config["sounds"]:
             hotkey = sound.get("hotkey")
-            if hotkey:
+            if hotkey and self._is_valid_hotkey(hotkey):
                 mapping[hotkey] = (lambda p=sound["path"]: self.play_sound(p))
 
         if mapping:
