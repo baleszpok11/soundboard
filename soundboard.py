@@ -149,6 +149,9 @@ def request_hotkey_permission():
         pass
 
 
+_macos_layout_context = None
+
+
 def pin_macos_keyboard_layout():
     """pynput reads the keyboard layout when its listener thread starts,
     but current macOS only allows that on the main thread and kills the
@@ -159,14 +162,28 @@ def pin_macos_keyboard_layout():
     from pynput._util import darwin as darwin_util
     from pynput.keyboard import _darwin as darwin_keyboard
 
+    global _macos_layout_context
     with darwin_util.keycode_context() as context:
-        pass
+        _macos_layout_context = context
 
     @contextlib.contextmanager
     def cached_context():
         yield context
 
     darwin_keyboard.keycode_context = cached_context
+
+
+def macos_base_char(vk):
+    """The character a key types without modifiers, from the layout pinned
+    by pin_macos_keyboard_layout (safe to call from any thread)."""
+    if _macos_layout_context is None:
+        return None
+    from pynput._util import darwin as darwin_util
+    try:
+        char = darwin_util.keycode_to_string(_macos_layout_context, vk)
+    except Exception:
+        return None
+    return char if len(char) == 1 and char.isprintable() else None
 
 
 MACOS_INPUT_MONITORING_URL = "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent"
@@ -831,27 +848,56 @@ class HotkeyDialog(ctk.CTkToplevel):
     def get(self):
         self.wait_window()
         return self.result
+HOTKEY_MODIFIERS = frozenset(
+    {pynkeyboard.Key.ctrl, pynkeyboard.Key.alt, pynkeyboard.Key.shift, pynkeyboard.Key.cmd}
+)
+
+
 class HotkeyListener(pynkeyboard.GlobalHotKeys):
-    """GlobalHotKeys that also reports while a key combination is held
-    (push-to-talk). on_hold(held) runs on the listener thread."""
+    """GlobalHotKeys that only fires a hotkey when exactly its modifiers are
+    held (pynput alone also fires <alt>+1 for Ctrl+Alt+1), and reports while
+    a key combination is held (push-to-talk). Callbacks run on the listener
+    thread."""
 
     def __init__(self, hotkeys, hold_hotkey=None, on_hold=None):
-        super().__init__(hotkeys)
+        self._pressed = set()
+        exact = {
+            text: self._when_modifiers(frozenset(pynkeyboard.HotKey.parse(text)) & HOTKEY_MODIFIERS, action)
+            for text, action in hotkeys.items()
+        }
+        super().__init__(exact)
         self._hold_keys = frozenset(pynkeyboard.HotKey.parse(hold_hotkey)) if hold_hotkey else frozenset()
         self._on_hold = on_hold
-        self._pressed = set()
         self._holding = False
 
+    def _when_modifiers(self, modifiers, action):
+        def run():
+            if self._pressed & HOTKEY_MODIFIERS == modifiers:
+                action()
+        return run
+
+    def canonical(self, key):
+        # pynput on macOS reports the typed character (Option+1 is "¡",
+        # Shift+1 is "!"), so hotkeys like <alt>+1 would never match. Use
+        # the key's unmodified character instead, as Windows does.
+        if sys.platform == "darwin" and isinstance(key, pynkeyboard.KeyCode) and key.vk is not None:
+            char = macos_base_char(key.vk)
+            if char:
+                return pynkeyboard.KeyCode.from_char(char.lower())
+        return super().canonical(key)
+
     def _on_press(self, key, injected):
+        if not injected:
+            self._pressed.add(self.canonical(key))
         super()._on_press(key, injected)
         if self._hold_keys and not injected:
-            self._pressed.add(self.canonical(key))
             self._update_hold()
 
     def _on_release(self, key, injected):
+        if not injected:
+            self._pressed.discard(self.canonical(key))
         super()._on_release(key, injected)
         if self._hold_keys and not injected:
-            self._pressed.discard(self.canonical(key))
             self._update_hold()
 
     def _update_hold(self):
