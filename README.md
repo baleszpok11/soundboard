@@ -161,9 +161,12 @@ too; if so, leave it off.
   content you have the right to use; downloading may be against the
   source site's terms of service.
 - **Sound Editor tab:** pick a sound (or browse for any file), drag the
-  Start/End sliders to trim it, adjust Bass (-12 to +12 dB), click
-  Preview to listen, then "Save as new sound" to write a new WAV into
-  `Sounds/` and add it to the board. The original file is not changed.
+  Start/End sliders to trim it (at least 0.05 s is kept), adjust Bass
+  (-12 to +12 dB), click Preview to listen (Stop ends the preview), then
+  "Save as new sound" to write a new WAV into `Sounds/` and add it to the
+  board. If a bass boost would push the clip past full volume, it's
+  turned down just enough to avoid distortion. The original file is not
+  changed.
 
 ### Where your data is stored
 
