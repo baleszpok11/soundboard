@@ -141,7 +141,11 @@ too; if so, leave it off.
   `<ctrl>+<alt>+1`), and Clear removes it. Letter, number and symbol keys
   need a modifier so they don't fire while you type.
 - "Play" to trigger a sound manually (works even if it's unchecked).
-- "Remove" takes a sound off the board and stops it if it's playing. For
+- Type in **Search sounds...** to filter the list. **List/Grid** switches
+  between rows and big buttons (click to play; right-click for options).
+- Drag a row by its `::` handle to reorder it. **More** has Rename, Move
+  up/down and Remove; double-clicking a name also renames it.
+- "Remove" (under More) takes a sound off the board and stops it if it's playing. For
   files in `Sounds/`, it asks whether to delete the file too.
 - Adding or downloading something that's already on the board doesn't
   create a second entry.
