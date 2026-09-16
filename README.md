@@ -22,6 +22,12 @@ together, from one virtual microphone.
 - "Hear soundboard" toggle plays clips on your own speakers/headphones
   too — turning it off doesn't affect what others hear through the
   virtual cable
+- Re-triggering a sound that's still playing restarts it
+- **Download** tab: grab audio from YouTube, TikTok, Instagram and other
+  sites (via yt-dlp) as MP3, straight into your board
+- **Sound Editor** tab: trim a clip's start/end and boost or cut bass,
+  with a waveform view and preview
+- All sounds live in one `Sounds/` folder
 - Settings persist automatically between runs
 - Runs from source (Python) or as a standalone executable — no Python
   required on the machine you run it on
@@ -36,7 +42,9 @@ Linux builds are published automatically for each tagged version (see
 
 ## Running from source
 
-Requirements: Python 3.9+.
+Requirements: Python 3.9+ with a current Tk. On macOS, the Python that
+ships with Apple's Command Line Tools has an outdated Tk that shows a
+blank window; use Homebrew instead (`brew install python@3.12 python-tk@3.12`).
 
 1. Set up a virtual audio device for your OS (see below).
 2. Install dependencies:
@@ -87,7 +95,8 @@ virtual cable as your microphone in Discord/games.
   triggered. Only clips are sent there, not your mic. If the virtual mic
   output is itself your default output (e.g. no virtual cable installed),
   you'll hear the main mix regardless of this setting.
-- "Add sound" to pick an audio file (wav, flac, ogg, mp3).
+- "Add sound" to pick an audio file (wav, flac, ogg, mp3); it's copied
+  into the `Sounds/` folder.
 - The checkbox next to each sound toggles it on/off — unchecked sounds
   keep their hotkey assignment but won't respond to it until re-enabled.
 - "Hotkey" to assign a global hotkey (e.g. `<ctrl>+<alt>+1`) that plays it
@@ -96,8 +105,23 @@ virtual cable as your microphone in Discord/games.
 - "Remove" to delete a sound from the board.
 - A sound listed in red with "(file missing)" points at a file that's
   been moved or deleted since it was added.
-- Settings are saved automatically to `soundboard_config.json`, next to
-  the script (or next to the executable, when run as a build).
+- Playing a sound that's already playing restarts it from the beginning.
+- **Download tab:** paste a video/clip URL and click "Download as MP3".
+  The audio is saved into `Sounds/` and added to the board. Only download
+  content you have the right to use; downloading may be against the
+  source site's terms of service.
+- **Sound Editor tab:** pick a sound (or browse for any file), drag the
+  Start/End sliders to trim it, adjust Bass (-12 to +12 dB), click
+  Preview to listen, then "Save as new sound" to write a new WAV into
+  `Sounds/` and add it to the board. The original file is not changed.
+
+### Where your data is stored
+
+`soundboard_config.json` and the `Sounds/` folder live:
+- next to `soundboard.py` when running from source
+- next to the executable on Windows/Linux builds
+- in `~/Documents/Soundboard` for the macOS app (macOS asks for
+  permission to use Documents on first launch)
 
 ## Building a standalone executable
 
@@ -106,18 +130,28 @@ Install build dependencies and run PyInstaller:
 ```
 pip install -r build-requirements.txt
 
+COLLECT="--collect-data customtkinter --collect-all yt_dlp --collect-all imageio_ffmpeg"
+
 # Windows
-pyinstaller --onefile --windowed --icon assets/icon.ico --add-data "assets/icon.png;assets" soundboard.py
+pyinstaller --onefile --windowed --icon assets/icon.ico --add-data "assets/icon.png;assets" $COLLECT soundboard.py
 
 # macOS
-pyinstaller --onefile --windowed --icon assets/icon.icns --add-data "assets/icon.png:assets" soundboard.py
+pyinstaller --onefile --windowed --icon assets/icon.icns --add-data "assets/icon.png:assets" $COLLECT soundboard.py
+plutil -insert NSMicrophoneUsageDescription -string "Soundboard uses your microphone." dist/soundboard.app/Contents/Info.plist
+codesign --force --deep -s - dist/soundboard.app
 
 # Linux
-pyinstaller --onefile --windowed --add-data "assets/icon.png:assets" soundboard.py
+pyinstaller --onefile --windowed --add-data "assets/icon.png:assets" $COLLECT soundboard.py
 ```
 
 The executable is written to `dist/`. Build on each target OS to get a
-native executable for it (PyInstaller does not cross-compile).
+native executable for it (PyInstaller does not cross-compile). The
+`--collect-*` flags bundle CustomTkinter's theme files, yt-dlp's site
+extractors and a portable ffmpeg. On macOS, the `plutil` line is required
+for microphone access, and the app has to be re-signed after editing it.
+
+The macOS build is not notarized, so on first launch right-click the app
+and choose Open.
 
 ### Publishing a release
 
@@ -135,16 +169,20 @@ downloader needs read access) for others to reach the Releases page.
 
 ## Notes
 
-- Audio is mixed at a fixed 48000 Hz, stereo. If a device doesn't support
-  that, opening it will show an error — pick a different device or check
-  its properties in your OS's sound settings.
+- Audio is mixed at a fixed 48000 Hz. Each device uses its own channel
+  count (mono or stereo) and audio is converted between them. If a device
+  doesn't support 48000 Hz, opening it will show an error — pick a
+  different device or check its properties in your OS's sound settings.
+- Devices are remembered by name, so plugging in new audio devices
+  doesn't change your selection.
 - Global hotkeys are handled via `pynput`. On Linux with Wayland, global
   hotkey capture may not work depending on your compositor (X11 works).
   On macOS, grant Accessibility permissions to your terminal/app when
   prompted for hotkeys to register.
-- Sound files are referenced by their absolute path in
-  `soundboard_config.json`; moving or renaming a sound file after adding
-  it will show it as missing in the list.
+- Sounds are stored in `soundboard_config.json` by filename, relative to
+  `Sounds/`, so you can move the whole folder. Sounds added by older
+  versions keep their absolute path; moving or renaming those files will
+  show them as missing in the list.
 
 ## License
 

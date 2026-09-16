@@ -30,10 +30,23 @@ import yt_dlp
 from pynput import keyboard as pynkeyboard
 from scipy.signal import lfilter
 
-APP_DIR = os.path.dirname(os.path.abspath(__file__))
+def _data_dir():
+    # A PyInstaller onefile build runs from a temp dir that is deleted on
+    # exit, so user data must live elsewhere. macOS .app bundles may be
+    # read-only (app translocation), so they use ~/Documents/Soundboard.
+    if not getattr(sys, "frozen", False):
+        return os.path.dirname(os.path.abspath(__file__))
+    if sys.platform == "darwin":
+        path = os.path.join(os.path.expanduser("~"), "Documents", "Soundboard")
+        os.makedirs(path, exist_ok=True)
+        return path
+    return os.path.dirname(os.path.abspath(sys.executable))
+
+
+APP_DIR = _data_dir()
 CONFIG_PATH = os.path.join(APP_DIR, "soundboard_config.json")
 SOUNDS_DIR = os.path.join(APP_DIR, "Sounds")
-ASSETS_DIR = os.path.join(getattr(sys, "_MEIPASS", APP_DIR), "assets")
+ASSETS_DIR = os.path.join(getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__))), "assets")
 ICON_PATH = os.path.join(ASSETS_DIR, "icon.png")
 
 SAMPLE_RATE = 48000
@@ -346,12 +359,15 @@ class Soundboard:
         self.input_devices = self._list_devices(output=False)
         self.output_devices = self._list_devices(output=True)
 
-        if is_first_run:
-            if len(self.input_devices) > 1:
-                self.config["input_device"] = self.input_devices[1][0]
-            if len(self.output_devices) > 1:
-                self.config["output_device"] = self.output_devices[1][0]
-            save_config(self.config)
+        # Devices are stored by name; indices shift when devices are added.
+        # Older configs stored indices, so those get re-picked too.
+        for key, devices, output in (
+            ("input_device", self.input_devices, False),
+            ("output_device", self.output_devices, True),
+        ):
+            if is_first_run or isinstance(self.config.get(key), int):
+                self.config[key] = self._default_device_name(devices, output)
+        save_config(self.config)
 
         self.tabview = ctk.CTkTabview(
             self.root,
@@ -391,11 +407,20 @@ class Soundboard:
         return entries
 
     @staticmethod
-    def _name_for_index(devices, index):
-        for i, name in devices:
-            if i == index:
-                return name
-        return devices[0][1]
+    def _default_device_name(devices, output):
+        """Mic defaults to the system input. Output prefers a device other
+        than the system output, since that is usually the virtual cable."""
+        names = [name for _, name in devices[1:]]
+        if not names:
+            return None
+        try:
+            system_default = sd.query_devices(kind="output" if output else "input")["name"]
+        except Exception:
+            system_default = None
+        if output:
+            others = [n for n in names if n != system_default]
+            return others[0] if others else names[0]
+        return system_default if system_default in names else names[0]
 
     @staticmethod
     def _index_for_name(devices, name):
@@ -415,8 +440,8 @@ class Soundboard:
             row=0, column=0, sticky="w", padx=8, pady=8
         )
         input_names = [name for _, name in self.input_devices]
-        current_input = self._name_for_index(self.input_devices, self.config.get("input_device"))
-        self.input_var = tk.StringVar(value=current_input if current_input in input_names else input_names[0])
+        current_input = self.config.get("input_device")
+        self.input_var = tk.StringVar(value=current_input if current_input in input_names else NO_DEVICE_LABEL)
         self.input_menu = ctk.CTkOptionMenu(
             frame,
             variable=self.input_var,
@@ -434,8 +459,8 @@ class Soundboard:
             row=1, column=0, sticky="w", padx=8, pady=8
         )
         output_names = [name for _, name in self.output_devices]
-        current_output = self._name_for_index(self.output_devices, self.config.get("output_device"))
-        self.output_var = tk.StringVar(value=current_output if current_output in output_names else output_names[0])
+        current_output = self.config.get("output_device")
+        self.output_var = tk.StringVar(value=current_output if current_output in output_names else NO_DEVICE_LABEL)
         self.output_menu = ctk.CTkOptionMenu(
             frame,
             variable=self.output_var,
@@ -465,12 +490,12 @@ class Soundboard:
         self.hear_self_checkbox.grid(row=1, column=2, sticky="w", padx=8, pady=8)
 
     def _on_input_device_change(self, selected_name):
-        self.config["input_device"] = self._index_for_name(self.input_devices, selected_name)
+        self.config["input_device"] = None if selected_name == NO_DEVICE_LABEL else selected_name
         save_config(self.config)
         self._restart_audio_engine()
 
     def _on_output_device_change(self, selected_name):
-        self.config["output_device"] = self._index_for_name(self.output_devices, selected_name)
+        self.config["output_device"] = None if selected_name == NO_DEVICE_LABEL else selected_name
         save_config(self.config)
         self._restart_audio_engine()
 
@@ -490,12 +515,13 @@ class Soundboard:
     def _restart_audio_engine(self):
         # Local copy goes to the system default output, unless that is
         # already the selected output (it would play twice).
-        output_device = self.config.get("output_device")
+        input_device = self._index_for_name(self.input_devices, self.config.get("input_device"))
+        output_device = self._index_for_name(self.output_devices, self.config.get("output_device"))
         monitor_device = self._default_output_device()
         if monitor_device == output_device:
             monitor_device = None
         try:
-            self.audio_engine.start(self.config.get("input_device"), output_device, monitor_device)
+            self.audio_engine.start(input_device, output_device, monitor_device)
             self.audio_engine.set_monitor_muted(not self.config.get("hear_self", True))
         except Exception as e:
             messagebox.showerror("Audio device error", str(e))

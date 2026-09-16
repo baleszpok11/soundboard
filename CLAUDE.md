@@ -6,16 +6,24 @@ the result to a chosen output device (virtual audio cable) so voice and
 sounds are picked up together as one microphone in Discord/games.
 A "Hear soundboard" toggle mirrors clips (not the mic) to the system
 default output, so you can hear them yourself without affecting what
-others hear.
+others hear. Tabs: Soundboard, Download (yt-dlp to MP3), Sound Editor
+(trim + bass).
 
 ## Stack
-- Python, CustomTkinter (GUI, orange/black theme)
+- Python, CustomTkinter (GUI, orange/black theme, CTkTabview)
 - sounddevice (input/output streams) + soundfile (decoding) + numpy
   (real-time mixing of mic input and sound clips, simple linear-interp
-  resampling to a fixed 48kHz/stereo pipeline)
+  resampling to 48kHz; channel count negotiated per device, max 2)
+- scipy (lfilter for the RBJ low-shelf bass filter)
+- yt-dlp + imageio-ffmpeg (downloader; bundled ffmpeg, no system install)
 - pynput (global hotkeys, cross-platform, format like `<ctrl>+<alt>+1`)
-- JSON file for config (no database)
-- PyInstaller (standalone executables), built via GitHub Actions CI
+- JSON file for config (no database); devices stored by name, sounds by
+  filename relative to Sounds/
+- PyInstaller (standalone executables), built via GitHub Actions CI; needs
+  --collect-data customtkinter --collect-all yt_dlp --collect-all
+  imageio_ffmpeg, plus NSMicrophoneUsageDescription on macOS
+- macOS dev: use Homebrew python@3.12 + python-tk@3.12 (Apple's CLT
+  Python ships Tk 8.5, which renders blank windows)
 
 ## Constraints
 - Everything free and open-source. No paywalled dependencies or services.
@@ -31,4 +39,7 @@ others hear.
 - build-requirements.txt — pip dependencies for building executables (pyinstaller)
 - README.md — setup and usage instructions
 - soundboard_config.json — generated at runtime, holds device + sound/hotkey mappings
+- Sounds/ — generated at runtime, holds all sound files (downloads, edits, imports)
+- Runtime data location: next to soundboard.py from source, next to the
+  executable in Windows/Linux builds, ~/Documents/Soundboard in the macOS app
 - .github/workflows/build.yml — CI matrix build of Windows/macOS/Linux executables
