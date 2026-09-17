@@ -177,6 +177,7 @@ class DeviceMixin:
         self._add_volume_row(frame, 2, "Mic volume:", "mic_volume", "mic_gain")
         self._add_volume_row(frame, 3, "Soundboard volume:", "sound_volume", "sound_gain")
         self._build_mic_controls(frame, 4)
+        self._build_startup_controls(frame, 5)
 
     def _add_volume_row(self, frame, row, text, config_key, engine_attr):
         ctk.CTkLabel(frame, text=text, text_color=COLOR_TEXT).grid(row=row, column=0, sticky="w", padx=8, pady=6)

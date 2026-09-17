@@ -86,6 +86,7 @@ def load_config():
     config.setdefault("push_to_talk", False)
     config.setdefault("ptt_hotkey", None)
     config.setdefault("sound_view", "list")
+    config.setdefault("close_to_tray", False)
     config.setdefault("sounds", [])
     config["sounds"] = [s for s in config["sounds"] if isinstance(s, dict) and s.get("path")]
     for sound in config["sounds"]:

@@ -86,9 +86,12 @@ def main():
             root.iconphoto(True, tk.PhotoImage(file=ICON_PATH))
         except tk.TclError:
             pass
-        Soundboard(root)
-        # CustomTkinter applies its own geometry after startup, so maximize afterwards.
-        root.after(100, lambda: _fit_to_screen(root))
+        board = Soundboard(root)
+        if "--hidden" in sys.argv:
+            board.hide_to_tray()  # started by the launch-at-login entry
+        else:
+            # CustomTkinter applies its own geometry after startup, so maximize afterwards.
+            root.after(100, lambda: _fit_to_screen(root))
     except Exception:
         _show_startup_error(root)
         return

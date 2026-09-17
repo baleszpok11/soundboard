@@ -31,6 +31,8 @@ together, from one virtual microphone.
   cancel, and optional start/end times
 - **Sound Editor** tab: trim a clip's start/end and boost or cut bass,
   with a waveform view and preview
+- Optionally start with the computer and keep running in the tray /
+  menu bar when the window is closed, so hotkeys still work
 - All sounds live in one `Sounds/` folder
 - Settings persist automatically between runs
 - Runs from source (Python) or as a standalone executable — no Python
@@ -208,7 +210,7 @@ Install build dependencies and run PyInstaller:
 ```
 pip install -r build-requirements.txt
 
-COLLECT="--collect-data customtkinter --collect-all yt_dlp --collect-all imageio_ffmpeg"
+COLLECT="--collect-data customtkinter --collect-all yt_dlp --collect-all imageio_ffmpeg --collect-all pystray"
 
 # Windows
 pyinstaller --onefile --windowed --icon assets/icon.ico --add-data "assets/icon.png;assets" $COLLECT soundboard.py
