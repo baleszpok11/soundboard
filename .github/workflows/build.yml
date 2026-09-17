@@ -102,10 +102,27 @@ jobs:
       - name: Create GitHub release with builds attached
         env:
           GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
         run: |
           # check-ytdlp.yml reads this line to spot outdated downloaders.
-          gh release create "${{ github.ref_name }}" artifacts/soundboard-*/*.zip \
-            --repo "${{ github.repository }}" \
-            --title "${{ github.ref_name }}" \
-            --notes "Built with yt-dlp $(cat ytdlp-version.txt)" \
-            --generate-notes
+          notes="Built with yt-dlp $(cat ytdlp-version.txt)"
+          if ! gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
+            gh release create "$TAG" artifacts/soundboard-*/*.zip \
+              --repo "$REPO" \
+              --title "$TAG" \
+              --notes "$notes" \
+              --generate-notes
+            exit 0
+          fi
+          # Publishing from the web UI creates the release before this job
+          # runs, so there is nothing left to create. Upload into the
+          # existing release instead, keeping the notes it already has and
+          # adding the yt-dlp line check-ytdlp.yml looks for.
+          gh release upload "$TAG" artifacts/soundboard-*/*.zip --repo "$REPO" --clobber
+          body=$(gh release view "$TAG" --repo "$REPO" --json body -q .body)
+          case "$body" in
+            "Built with yt-dlp "*) ;;
+            *) gh release edit "$TAG" --repo "$REPO" \
+                 --notes "$(printf '%s\n\n%s' "$notes" "$body")" ;;
+          esac
