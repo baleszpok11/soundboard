@@ -12,8 +12,12 @@ virtual audio cable.
     for the editor: filters, phase vocoder), `hotkeys.py` (listener and
     platform quirks), `dialogs.py`, `downloader.py` (yt-dlp), `config.py`,
     `theme.py`, `tray.py`, `autostart.py`, `bug_report.py`
-- Config, `Sounds/` and `assets/` live at the repo root, not in the
-  package: `config.py` anchors them one level up from itself
+- Config, `Sounds/` and `assets/` live at the repo root when running
+  from source: `config.py` anchors them one level up from itself. A
+  built app puts user data in the per-user folder instead
+  (`%APPDATA%\Soundboard`, `~/.local/share/Soundboard`,
+  `~/Documents/Soundboard` on macOS), so moving or updating the
+  executable cannot take someone's board with it
 
 ## Stack notes
 - Windows: device lists filtered to one host API (WASAPI with
@@ -67,7 +71,13 @@ virtual audio cable.
   relay/ (REPORT_URL in bug_report.py), falling back to a prefilled issue
   URL. Never put a GitHub token in the app - it can be extracted
 - JSON file for config (no database); devices stored by name, sounds by
-  filename relative to Sounds/
+  filename relative to Sounds/. Built apps used to keep both beside the
+  executable, which put boards in people's Downloads folder and lost
+  them when the exe moved; migrate_data_dir() copies such a board into
+  the per-user folder on first run. It copies rather than moves, skips
+  entirely when the new location already has a config, and writes the
+  config last, so an interrupted copy retries instead of leaving a
+  half-migrated board
 - Profiles: config["profiles"] is a list of {name, sounds}, addressed by
   name through config["active_profile"]; use active_profile()/
   profile_sounds() or the Soundboard.profile/.sounds properties rather

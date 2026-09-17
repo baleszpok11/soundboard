@@ -1,14 +1,17 @@
 """Paths, the JSON config file and the error log.
 
 Config (devices + sound/hotkey mappings) is stored in
-soundboard_config.json, created next to the script (or next to the
-executable, when built) on first run. Sound files live in the Sounds/
-folder next to it.
+soundboard_config.json, with sound files in a Sounds/ folder beside it.
+Running from source that is the project root; a built app puts them in
+the per-user data folder for the platform, so the executable can be
+moved, replaced by an update or run from a download folder without the
+board going with it.
 """
 
 import json
 import os
 import re
+import shutil
 import sys
 import tempfile
 
@@ -17,16 +20,38 @@ import tempfile
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
+APP_FOLDER_NAME = "Soundboard"
+
+
 def _data_dir():
     # A PyInstaller onefile build runs from a temp dir that is deleted on
-    # exit, so user data must live elsewhere. macOS .app bundles may be
-    # read-only (app translocation), so they use ~/Documents/Soundboard.
+    # exit, so user data must live elsewhere. It used to go beside the
+    # executable, which put people's boards in their Downloads folder and
+    # lost them the moment the executable was moved.
     if not getattr(sys, "frozen", False):
         return _PROJECT_ROOT
     if sys.platform == "darwin":
-        path = os.path.join(os.path.expanduser("~"), "Documents", "Soundboard")
+        path = os.path.join(os.path.expanduser("~"), "Documents", APP_FOLDER_NAME)
+    elif os.name == "nt":
+        base = os.environ.get("APPDATA") or os.path.join(os.path.expanduser("~"), "AppData", "Roaming")
+        path = os.path.join(base, APP_FOLDER_NAME)
+    else:
+        base = os.environ.get("XDG_DATA_HOME") or os.path.join(os.path.expanduser("~"), ".local", "share")
+        path = os.path.join(base, APP_FOLDER_NAME)
+    try:
         os.makedirs(path, exist_ok=True)
-        return path
+    except OSError:
+        # Nowhere to write: fall back to the old behaviour rather than
+        # failing to start.
+        return _legacy_data_dir()
+    return path
+
+
+def _legacy_data_dir():
+    """Where a built app kept its data before it moved to the per-user
+    folder: beside the executable."""
+    if not getattr(sys, "frozen", False):
+        return _PROJECT_ROOT
     return os.path.dirname(os.path.abspath(sys.executable))
 
 
@@ -69,8 +94,38 @@ def unique_path(path):
     return f"{base}_{n}{ext}"
 
 
+def migrate_data_dir():
+    """Copy a board left beside the executable into the per-user folder.
+
+    Copies rather than moves, and only when there is nothing to lose:
+    if the new location already has a config, the old one is left alone
+    and ignored. The originals stay where they are, so a failure here
+    costs nothing and the old folder remains a fallback until the user
+    deletes it. Returns True when something was copied.
+    """
+    old_dir = _legacy_data_dir()
+    if same_file(old_dir, APP_DIR) or os.path.exists(CONFIG_PATH):
+        return False
+    old_config = os.path.join(old_dir, "soundboard_config.json")
+    if not os.path.exists(old_config):
+        return False
+    old_sounds = os.path.join(old_dir, "Sounds")
+    try:
+        if os.path.isdir(old_sounds):
+            # dirs_exist_ok: the folder may already be there and empty.
+            shutil.copytree(old_sounds, SOUNDS_DIR, dirs_exist_ok=True)
+        # The config goes last: until it lands, nothing treats the new
+        # folder as the live one, so an interrupted copy is not a
+        # half-migrated board.
+        shutil.copy2(old_config, CONFIG_PATH)
+    except OSError:
+        return False
+    return True
+
+
 def load_config():
     """Raises ValueError if the file exists but is not a valid config."""
+    migrate_data_dir()
     config = {}
     if os.path.exists(CONFIG_PATH):
         with open(CONFIG_PATH, "r", encoding="utf-8") as f:
