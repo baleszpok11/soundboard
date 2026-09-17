@@ -9,7 +9,20 @@ import numpy as np
 import soundfile as sf
 
 from .audio_engine import _resample
-from .dsp import apply_bass, pitch_shift, time_stretch
+from .dsp import (
+    apply_bass,
+    apply_drive,
+    apply_echo,
+    apply_mid,
+    apply_robot,
+    apply_stutter,
+    apply_telephone,
+    apply_treble,
+    apply_width,
+    pitch_shift,
+    reverse,
+    time_stretch,
+)
 from .config import (
     SOUNDS_DIR,
     ensure_sounds_dir,
@@ -41,6 +54,51 @@ SPEED_RANGE_OCTAVES = 2  # the speed slider is in octaves, so 0.25x to 4x
 MIN_FADE_MAX_S = 0.01  # a slider whose ends meet divides by zero
 PLAYHEAD_POLL_MS = 50
 UNDO_SETTLE_MS = 400  # sliders fire continuously; one undo step per burst
+
+TONE_RANGE_DB = 36
+DRIVE_MAX_DB = 36
+ROBOT_MAX_HZ = 400
+ECHO_MAX = 0.85  # any more and the repeats outlast anyone's patience
+STUTTER_MAX_S = 0.3
+WIDTH_MAX = 2.0
+
+
+def _db_text(value):
+    return f"{value:+.0f} dB"
+
+
+def _drive_text(value):
+    return "off" if value <= 0 else f"{value:.0f} dB"
+
+
+def _hz_text(value):
+    return "off" if value <= 0 else f"{value:.0f} Hz"
+
+
+def _amount_text(value):
+    return "off" if value <= 0 else f"{value * 100:.0f}%"
+
+
+def _ms_text(value):
+    return "off" if value <= 0 else f"{value * 1000:.0f} ms"
+
+
+def _width_text(value):
+    return "mono" if value <= 0 else f"{value:.2f}x"
+
+
+# key, label, range, default, how the value reads. Kept as data because
+# every one of them has to be reset, saved for undo and restored again.
+EFFECT_SLIDERS = (
+    ("treble", "Treble:", -TONE_RANGE_DB, TONE_RANGE_DB, 0.0, _db_text),
+    ("mid", "Mid:", -TONE_RANGE_DB, TONE_RANGE_DB, 0.0, _db_text),
+    ("drive", "Drive:", 0.0, DRIVE_MAX_DB, 0.0, _drive_text),
+    ("robot", "Robot:", 0.0, ROBOT_MAX_HZ, 0.0, _hz_text),
+    ("echo", "Echo:", 0.0, ECHO_MAX, 0.0, _amount_text),
+    ("stutter", "Stutter:", 0.0, STUTTER_MAX_S, 0.0, _ms_text),
+    ("width", "Width:", 0.0, WIDTH_MAX, 1.0, _width_text),
+)
+EFFECT_TOGGLES = (("telephone", "Telephone"), ("reverse", "Reverse"))
 
 # What to do when the clip ends up louder than full scale.
 CLIP_CLEAN = "Keep clean"
@@ -89,7 +147,35 @@ class EditorMixin:
         self.editor_canvas.pack(fill="x", padx=4, pady=4)
         self.editor_canvas.bind("<Configure>", lambda e: self._draw_waveform())
 
-        trim_frame = ctk.CTkFrame(parent, fg_color=COLOR_SURFACE)
+        buttons = ctk.CTkFrame(parent, fg_color=COLOR_BG)
+        buttons.pack(side="bottom", fill="x", padx=4, pady=(4, 8))
+        self.editor_preview_button = ctk.CTkButton(
+            buttons, text="Preview", command=self._on_editor_preview,
+            hover_color=COLOR_ORANGE_HOVER, text_color=COLOR_BG, text_color_disabled=COLOR_TEXT_DIM,
+        )
+        self.editor_preview_button.pack(side="left", padx=(4, 4))
+        self.editor_stop_button = ctk.CTkButton(
+            buttons, text="Stop", command=lambda: self.audio_engine.stop_key(EDITOR_PREVIEW_KEY),
+            hover_color="#cc4444", text_color=COLOR_BG, text_color_disabled=COLOR_TEXT_DIM,
+        )
+        self.editor_stop_button.pack(side="left", padx=(4, 4))
+        self.editor_undo_button = ctk.CTkButton(
+            buttons, text="Undo", command=self._on_editor_undo,
+            fg_color=COLOR_ROW, hover_color=COLOR_SURFACE, text_color=COLOR_ORANGE,
+            text_color_disabled=COLOR_TEXT_DIM, border_width=1,
+        )
+        self.editor_undo_button.pack(side="left", padx=(4, 4))
+        self.editor_save_button = ctk.CTkButton(
+            buttons, text="Save as new sound", command=self._on_editor_save,
+            fg_color=COLOR_ROW, hover_color=COLOR_SURFACE, text_color=COLOR_ORANGE,
+            text_color_disabled=COLOR_TEXT_DIM, border_width=1,
+        )
+        self.editor_save_button.pack(side="left", padx=(4, 4))
+
+        scroll = ctk.CTkScrollableFrame(parent, fg_color=COLOR_BG)
+        scroll.pack(fill="both", expand=True, padx=0, pady=0)
+
+        trim_frame = ctk.CTkFrame(scroll, fg_color=COLOR_SURFACE)
         trim_frame.pack(fill="x", padx=4, pady=4)
         trim_frame.grid_columnconfigure(1, weight=1)
 
@@ -211,30 +297,50 @@ class EditorMixin:
         self.editor_clip_mode.set(CLIP_CLEAN)
         self.editor_clip_mode.grid(row=8, column=1, columnspan=2, sticky="w", padx=8, pady=6)
 
-        buttons = ctk.CTkFrame(parent, fg_color=COLOR_BG)
-        buttons.pack(fill="x", padx=4, pady=(4, 8))
-        self.editor_preview_button = ctk.CTkButton(
-            buttons, text="Preview", command=self._on_editor_preview,
-            hover_color=COLOR_ORANGE_HOVER, text_color=COLOR_BG, text_color_disabled=COLOR_TEXT_DIM,
-        )
-        self.editor_preview_button.pack(side="left", padx=(4, 4))
-        self.editor_stop_button = ctk.CTkButton(
-            buttons, text="Stop", command=lambda: self.audio_engine.stop_key(EDITOR_PREVIEW_KEY),
-            hover_color="#cc4444", text_color=COLOR_BG, text_color_disabled=COLOR_TEXT_DIM,
-        )
-        self.editor_stop_button.pack(side="left", padx=(4, 4))
-        self.editor_undo_button = ctk.CTkButton(
-            buttons, text="Undo", command=self._on_editor_undo,
-            fg_color=COLOR_ROW, hover_color=COLOR_SURFACE, text_color=COLOR_ORANGE,
-            text_color_disabled=COLOR_TEXT_DIM, border_width=1,
-        )
-        self.editor_undo_button.pack(side="left", padx=(4, 4))
-        self.editor_save_button = ctk.CTkButton(
-            buttons, text="Save as new sound", command=self._on_editor_save,
-            fg_color=COLOR_ROW, hover_color=COLOR_SURFACE, text_color=COLOR_ORANGE,
-            text_color_disabled=COLOR_TEXT_DIM, border_width=1,
-        )
-        self.editor_save_button.pack(side="left", padx=(4, 4))
+        effects = ctk.CTkFrame(scroll, fg_color=COLOR_SURFACE)
+        effects.pack(fill="x", padx=4, pady=(0, 4))
+        ctk.CTkLabel(
+            effects, text="Effects", text_color=COLOR_TEXT_DIM, anchor="w",
+        ).grid(row=0, column=0, columnspan=6, sticky="w", padx=8, pady=(6, 0))
+        for column in (1, 4):
+            effects.grid_columnconfigure(column, weight=1)
+
+        # Two columns, so seven sliders cost four rows instead of seven.
+        self.editor_effect_sliders = {}
+        for index, (key, text, low, high, default, fmt) in enumerate(EFFECT_SLIDERS):
+            row = 1 + index // 2
+            column = (index % 2) * 3
+            ctk.CTkLabel(effects, text=text, text_color=COLOR_TEXT).grid(
+                row=row, column=column, sticky="w", padx=(8, 4), pady=6
+            )
+            label = ctk.CTkLabel(effects, text=fmt(default), text_color=COLOR_TEXT, width=60)
+            slider = ctk.CTkSlider(
+                effects, from_=low, to=high,
+                command=lambda value, k=key: self._on_effect_change(k, value),
+                fg_color=COLOR_ROW, progress_color=COLOR_ORANGE,
+                button_color=COLOR_ORANGE, button_hover_color=COLOR_ORANGE_HOVER,
+            )
+            slider.set(default)
+            slider.grid(row=row, column=column + 1, sticky="ew", padx=4, pady=6)
+            label.grid(row=row, column=column + 2, padx=(4, 8), pady=6)
+            self.editor_effect_sliders[key] = (slider, label, fmt, default)
+
+        self.editor_effect_toggles = {}
+        # An odd number of sliders leaves half a row free; put the toggles
+        # there rather than starting another one.
+        spare = len(EFFECT_SLIDERS) % 2
+        last_row = 1 + (len(EFFECT_SLIDERS) - 1) // 2
+        row = last_row if spare else last_row + 1
+        column = 3 if spare else 0
+        for index, (key, text) in enumerate(EFFECT_TOGGLES):
+            box = ctk.CTkCheckBox(
+                effects, text=text, command=self._record_editor_change,
+                fg_color=COLOR_ORANGE, hover_color=COLOR_ORANGE_HOVER,
+                checkmark_color=COLOR_BG, text_color=COLOR_TEXT,
+            )
+            box.grid(row=row, column=column + index, sticky="w", padx=8, pady=6)
+            self.editor_effect_toggles[key] = box
+
         self._set_editor_enabled(False)
 
         self._refresh_editor_sound_list()
@@ -305,6 +411,11 @@ class EditorMixin:
         self.editor_speed_label.configure(text=self._speed_text(0))
         self.editor_link_checkbox.deselect()
         self.editor_clip_mode.set(CLIP_CLEAN)
+        for slider, label, fmt, default in self.editor_effect_sliders.values():
+            slider.set(default)
+            label.configure(text=fmt(default))
+        for box in self.editor_effect_toggles.values():
+            box.deselect()
         self._editor_undo = []
         self._editor_committed = self._editor_state()
         self._update_undo_button()
@@ -319,6 +430,10 @@ class EditorMixin:
             slider.configure(state=state, button_color=accent, progress_color=accent)
         self.editor_normalize_checkbox.configure(state=state)
         self.editor_link_checkbox.configure(state=state)
+        for slider, _label, _fmt, _default in self.editor_effect_sliders.values():
+            slider.configure(state=state, button_color=accent, progress_color=accent)
+        for box in self.editor_effect_toggles.values():
+            box.configure(state=state)
         self.editor_clip_mode.configure(state=state)
         self._set_gain_enabled(not self.editor_normalize_checkbox.get())
         self.editor_preview_button.configure(state=state, fg_color=COLOR_ORANGE if enabled else COLOR_ROW)
@@ -403,6 +518,14 @@ class EditorMixin:
         self.editor_pitch_slider.set(semitones)
         self.editor_pitch_label.configure(text=self._pitch_text(semitones))
 
+    def _on_effect_change(self, key, value):
+        _slider, label, fmt, _default = self.editor_effect_sliders[key]
+        label.configure(text=fmt(value))
+        self._record_editor_change()
+
+    def _effect(self, key):
+        return self.editor_effect_sliders[key][0].get()
+
     def _on_link_change(self):
         """Tape mode ties the two together, the way a tape machine does.
         Pitch is the one that was here first, so speed follows it."""
@@ -445,6 +568,9 @@ class EditorMixin:
             "speed": self.editor_speed_slider.get(),
             "link": bool(self.editor_link_checkbox.get()),
             "clip": self.editor_clip_mode.get(),
+            "effects": {key: slider.get()
+                        for key, (slider, _l, _f, _d) in self.editor_effect_sliders.items()},
+            "toggles": {key: bool(box.get()) for key, box in self.editor_effect_toggles.items()},
         }
 
     def _apply_editor_state(self, state):
@@ -465,6 +591,13 @@ class EditorMixin:
         else:
             self.editor_link_checkbox.deselect()
         self.editor_clip_mode.set(state["clip"])
+        for key, value in state["effects"].items():
+            slider, label, fmt, _default = self.editor_effect_sliders[key]
+            slider.set(value)
+            label.configure(text=fmt(value))
+        for key, value in state["toggles"].items():
+            box = self.editor_effect_toggles[key]
+            box.select() if value else box.deselect()
         self.editor_start_label.configure(text=f"{state['start']:.2f}s")
         self.editor_end_label.configure(text=f"{state['end']:.2f}s")
         self.editor_bass_label.configure(text=f"{state['bass']:+.0f} dB")
@@ -563,12 +696,18 @@ class EditorMixin:
         trimmed = self.editor_data[start_sample:end_sample]
         if len(trimmed) == 0:
             raise ValueError("The selected part is empty. Move the Start and End sliders apart.")
+        if self.editor_effect_toggles["reverse"].get():
+            trimmed = reverse(trimmed)
         processed = apply_bass(trimmed, self.editor_bass_slider.get(), self.editor_samplerate)
+        processed = self._apply_effects(processed)
         normalize = bool(self.editor_normalize_checkbox.get())
         if not normalize:
             processed = processed * (10 ** (self.editor_gain_slider.get() / 20))
         processed = self._apply_clipping(processed)
         processed = self._apply_fades(processed)
+        # Echo comes after the fades, so the repeats are of the finished
+        # clip and the tail dies away instead of being faded out mid-ring.
+        processed = apply_echo(processed, self._effect("echo"), self.editor_samplerate)
         peak = float(np.abs(processed).max())
         # Normalize lifts the clip to SAVE_PEAK. Otherwise only "Keep clean"
         # brings it down; the other modes have already dealt with the
@@ -598,6 +737,20 @@ class EditorMixin:
         # neither undoes the level set above.
         data = time_stretch(data, 2 ** octaves)
         return pitch_shift(data, semitones, self.editor_samplerate)
+
+    def _apply_effects(self, data):
+        """Tone first, then the things that reshape the waveform, then the
+        ones that rearrange it. Echo is the exception and runs at the end
+        of the whole chain, once the fades are in."""
+        rate = self.editor_samplerate
+        data = apply_treble(data, self._effect("treble"), rate)
+        data = apply_mid(data, self._effect("mid"), rate)
+        if self.editor_effect_toggles["telephone"].get():
+            data = apply_telephone(data, rate)
+        data = apply_drive(data, self._effect("drive"))
+        data = apply_robot(data, self._effect("robot"), rate)
+        data = apply_width(data, self._effect("width"))
+        return apply_stutter(data, self._effect("stutter"), rate)
 
     def _apply_clipping(self, data):
         """What to do with anything past full scale. "Keep clean" leaves it

@@ -41,8 +41,9 @@ together, from one virtual microphone.
   cancel, and optional start/end times
 - **Sound Editor** tab: trim a clip's start/end, boost or cut bass, set
   volume or normalize, fade in/out, change pitch and speed independently
-  of each other, and choose whether loud edits stay clean or clip, with
-  a waveform view, preview and undo
+  of each other, choose whether loud edits stay clean or clip, and pile
+  on effects (treble, mid, drive, robot, echo, stutter, width,
+  telephone, reverse), with a waveform view, preview and undo
 - Optionally start with the computer and keep running in the tray /
   menu bar when the window is closed, so hotkeys still work
 - All sounds live in one `Sounds/` folder
@@ -241,6 +242,23 @@ too; if so, leave it off.
   very good on voices and most soundboard material but smears sharp
   drum hits at extreme settings. Tape mode doesn't use it at all, so
   it stays the cleanest option when you want both to move together.
+
+  Under **Effects**:
+
+  | | |
+  | --- | --- |
+  | **Treble** / **Mid** | the rest of the tone controls: a high shelf at 4 kHz and a peak at 1 kHz, both -36 to +36 dB |
+  | **Drive** | overdrive - pushes the clip into a soft saturation, loud and dirty |
+  | **Robot** | ring modulation, a metallic rasp that gets harsher the higher you take it |
+  | **Echo** | repeats a quarter of a second apart, each quieter than the last; the clip gets longer so the tail can die away |
+  | **Stutter** | holds each slice and plays it twice, so the clip glitches without changing length |
+  | **Width** | mono at 0, untouched at 1, exaggerated stereo above that |
+  | **Telephone** | keeps only 300-3000 Hz, so it sounds like a phone line |
+  | **Reverse** | plays it backwards |
+
+  They stack in a fixed order: tone, then drive and robot, then width and
+  stutter, with the echo last so it repeats the finished clip. Everything
+  is previewed before you save, and the source file is never touched.
 
   **Too loud** decides what happens when the settings push the clip past
   full volume, which a big bass or volume boost easily does:
