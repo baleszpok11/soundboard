@@ -34,6 +34,12 @@ virtual audio cable.
   (phase vocoder + inverse resample); the editor's Tape toggle bypasses
   both and uses one plain resample, which sounds better than a round
   trip through the vocoder
+- Editor effects are declared as data in EFFECT_SLIDERS / EFFECT_TOGGLES
+  and built in a loop, so a new one needs a row in the table and a call
+  in _apply_effects; reset, undo and enable/disable all walk the tables.
+  The editor's controls sit in a CTkScrollableFrame with the buttons
+  packed side="bottom" first - pack them after and the scrolling frame
+  takes the whole cavity and leaves them nothing
 - Errors: Tk callback errors and startup failures show a dialog and append
   to soundboard_error.log; config writes are atomic
 - Sharing: board_file.py reads/writes .sbboard files (links, not audio);
