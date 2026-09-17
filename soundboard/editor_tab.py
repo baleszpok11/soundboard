@@ -31,11 +31,20 @@ MIN_CLIP_S = 0.05  # shortest clip the editor can trim to
 SAVE_PEAK = 0.99  # edited clips louder than full scale are scaled down to this
 EDITOR_PLACEHOLDER = "Choose a sound..."
 EDITOR_PREVIEW_KEY = "editor-preview"
-GAIN_RANGE_DB = 24
-FADE_MAX_S = 5.0
+# Ranges are deliberately past the point of good taste: ruining a clip is
+# half of what a soundboard is for.
+BASS_RANGE_DB = 36
+GAIN_RANGE_DB = 40
+PITCH_RANGE_ST = 24  # two octaves either way
+MIN_FADE_MAX_S = 0.01  # a slider whose ends meet divides by zero
 PLAYHEAD_POLL_MS = 50
 UNDO_SETTLE_MS = 400  # sliders fire continuously; one undo step per burst
-PITCH_RANGE_ST = 12  # semitones either way, so the ends are exactly an octave
+
+# What to do when the clip ends up louder than full scale.
+CLIP_CLEAN = "Keep clean"
+CLIP_HARD = "Let it clip"
+CLIP_SOFT = "Soft clip"
+CLIP_MODES = (CLIP_CLEAN, CLIP_HARD, CLIP_SOFT)
 
 
 def speed_for_semitones(semitones):
@@ -106,7 +115,7 @@ class EditorMixin:
 
         ctk.CTkLabel(trim_frame, text="Bass:", text_color=COLOR_TEXT).grid(row=2, column=0, sticky="w", padx=8, pady=6)
         self.editor_bass_slider = ctk.CTkSlider(
-            trim_frame, from_=-12, to=12, command=self._on_bass_change,
+            trim_frame, from_=-BASS_RANGE_DB, to=BASS_RANGE_DB, command=self._on_bass_change,
             fg_color=COLOR_ROW, progress_color=COLOR_ORANGE,
             button_color=COLOR_ORANGE, button_hover_color=COLOR_ORANGE_HOVER,
         )
@@ -138,7 +147,7 @@ class EditorMixin:
                 row=row, column=0, sticky="w", padx=8, pady=6
             )
             slider = ctk.CTkSlider(
-                trim_frame, from_=0, to=FADE_MAX_S, command=lambda v: self._on_fade_change(),
+                trim_frame, from_=0, to=MIN_FADE_MAX_S, command=lambda v: self._on_fade_change(),
                 fg_color=COLOR_ROW, progress_color=COLOR_ORANGE,
                 button_color=COLOR_ORANGE, button_hover_color=COLOR_ORANGE_HOVER,
             )
@@ -165,6 +174,18 @@ class EditorMixin:
             trim_frame, text=self._pitch_text(0), text_color=COLOR_TEXT, width=60,
         )
         self.editor_pitch_label.grid(row=6, column=2, padx=8, pady=6)
+
+        ctk.CTkLabel(trim_frame, text="Too loud:", text_color=COLOR_TEXT).grid(
+            row=7, column=0, sticky="w", padx=8, pady=6
+        )
+        self.editor_clip_mode = ctk.CTkSegmentedButton(
+            trim_frame, values=list(CLIP_MODES),
+            command=lambda _v: self._record_editor_change(),
+            selected_color=COLOR_ORANGE, selected_hover_color=COLOR_ORANGE_HOVER,
+            unselected_color=COLOR_ROW, unselected_hover_color=COLOR_SURFACE, text_color=COLOR_TEXT,
+        )
+        self.editor_clip_mode.set(CLIP_CLEAN)
+        self.editor_clip_mode.grid(row=7, column=1, sticky="w", padx=8, pady=6)
 
         buttons = ctk.CTkFrame(parent, fg_color=COLOR_BG)
         buttons.pack(fill="x", padx=4, pady=(4, 8))
@@ -251,12 +272,12 @@ class EditorMixin:
         self.editor_gain_label.configure(text="+0 dB")
         self.editor_normalize_checkbox.deselect()
         self._set_gain_enabled(True)
-        for slider, label in ((self.editor_fade_in_slider, self.editor_fade_in_label),
-                              (self.editor_fade_out_slider, self.editor_fade_out_label)):
+        for slider in (self.editor_fade_in_slider, self.editor_fade_out_slider):
             slider.set(0)
-            label.configure(text="0.00s")
+        self._clamp_fades()
         self.editor_pitch_slider.set(0)
         self.editor_pitch_label.configure(text=self._pitch_text(0))
+        self.editor_clip_mode.set(CLIP_CLEAN)
         self._editor_undo = []
         self._editor_committed = self._editor_state()
         self._update_undo_button()
@@ -270,6 +291,7 @@ class EditorMixin:
                        self.editor_pitch_slider):
             slider.configure(state=state, button_color=accent, progress_color=accent)
         self.editor_normalize_checkbox.configure(state=state)
+        self.editor_clip_mode.configure(state=state)
         self._set_gain_enabled(not self.editor_normalize_checkbox.get())
         self.editor_preview_button.configure(state=state, fg_color=COLOR_ORANGE if enabled else COLOR_ROW)
         self.editor_stop_button.configure(state=state, fg_color=COLOR_ERROR if enabled else COLOR_ROW)
@@ -340,10 +362,13 @@ class EditorMixin:
         self._record_editor_change()
 
     def _clamp_fades(self):
-        """Both fades share the selection, so neither can take more than half."""
-        limit = max(0.0, (self.editor_end_slider.get() - self.editor_start_slider.get()) / 2)
+        """Both fades share the selection, so neither can take more than
+        half of it. That half is also the slider's range, so a long clip
+        can fade for as long as it likes."""
+        limit = max(MIN_FADE_MAX_S, (self.editor_end_slider.get() - self.editor_start_slider.get()) / 2)
         for slider, label in ((self.editor_fade_in_slider, self.editor_fade_in_label),
                               (self.editor_fade_out_slider, self.editor_fade_out_label)):
+            slider.configure(to=limit)
             if slider.get() > limit:
                 slider.set(limit)
             label.configure(text=f"{slider.get():.2f}s")
@@ -360,6 +385,7 @@ class EditorMixin:
             "fade_in": self.editor_fade_in_slider.get(),
             "fade_out": self.editor_fade_out_slider.get(),
             "pitch": self.editor_pitch_slider.get(),
+            "clip": self.editor_clip_mode.get(),
         }
 
     def _apply_editor_state(self, state):
@@ -374,6 +400,7 @@ class EditorMixin:
         self.editor_fade_in_slider.set(state["fade_in"])
         self.editor_fade_out_slider.set(state["fade_out"])
         self.editor_pitch_slider.set(state["pitch"])
+        self.editor_clip_mode.set(state["clip"])
         self.editor_start_label.configure(text=f"{state['start']:.2f}s")
         self.editor_end_label.configure(text=f"{state['end']:.2f}s")
         self.editor_bass_label.configure(text=f"{state['bass']:+.0f} dB")
@@ -475,10 +502,12 @@ class EditorMixin:
         normalize = bool(self.editor_normalize_checkbox.get())
         if not normalize:
             processed = processed * (10 ** (self.editor_gain_slider.get() / 20))
+        processed = self._apply_clipping(processed)
         processed = self._apply_fades(processed)
         peak = float(np.abs(processed).max())
-        # Normalize lifts the clip to SAVE_PEAK; otherwise only bring it down,
-        # since WAV files hard-clip anything past full scale.
+        # Normalize lifts the clip to SAVE_PEAK. Otherwise only "Keep clean"
+        # brings it down; the other modes have already dealt with the
+        # overshoot themselves, and undoing that would be the point missed.
         if peak > 0 and (normalize or peak > 1.0):
             processed = processed * (SAVE_PEAK / peak)
         # Pitch goes last, so the fades stay the same share of the clip and
@@ -491,6 +520,20 @@ class EditorMixin:
             if len(processed) == 0:
                 raise ValueError("The selected part is too short to pitch this far.")
         return processed
+
+    def _apply_clipping(self, data):
+        """What to do with anything past full scale. "Keep clean" leaves it
+        for the peak guard below to scale down; the other two shape it here,
+        before the fades, so a fade-out lowers the distorted clip rather
+        than being distorted itself."""
+        mode = self.editor_clip_mode.get()
+        if mode == CLIP_HARD:
+            return np.clip(data, -1.0, 1.0)
+        if mode == CLIP_SOFT:
+            # tanh is what a distortion pedal does: it bends the loud parts
+            # over instead of shearing them off, so it stays musical.
+            return np.tanh(data).astype(np.float32)
+        return data
 
     def _apply_fades(self, data):
         fade_in = min(int(self.editor_fade_in_slider.get() * self.editor_samplerate), len(data))
