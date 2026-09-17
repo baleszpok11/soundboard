@@ -283,7 +283,12 @@ class SoundListMixin:
             self.move_sound(source, target.sound_index)
 
     def _on_toggle_sound(self, index, checkbox):
-        self.config["sounds"][index]["enabled"] = bool(checkbox.get())
+        sound = self.config["sounds"][index]
+        sound["enabled"] = bool(checkbox.get())
+        if not sound["enabled"]:
+            # Unchecking is the obvious "make this stop" gesture, so don't
+            # leave a clip that's already playing running to the end.
+            self.audio_engine.stop_key(os.path.abspath(resolve_sound_path(sound["path"])))
         save_config(self.config)
         self._apply_hotkeys()
 
