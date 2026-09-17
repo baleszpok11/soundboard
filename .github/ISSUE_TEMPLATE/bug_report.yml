@@ -1,0 +1,74 @@
+name: Bug report
+description: Something in the app does not work
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        The **Report a bug** button on the Soundboard tab fills most of
+        this in for you, and shows you the report before anything is
+        sent. If you used it, paste what it produced and skip the rest.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Add a sound
+        2. Assign a hotkey
+        3. Press it while Discord is focused
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - Windows
+        - macOS
+        - Linux
+    validations:
+      required: true
+  - type: input
+    id: os-version
+    attributes:
+      label: OS version
+      placeholder: "Windows 11 23H2 / macOS 15.3 / Ubuntu 24.04"
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Soundboard version
+      description: Shown in the window title. If you run from source, say so and give the commit.
+      placeholder: "0.9.0, or 'from source at abc1234'"
+    validations:
+      required: true
+  - type: input
+    id: devices
+    attributes:
+      label: Input and output devices
+      description: Which microphone and which output are selected in the app. Skip if the bug has nothing to do with audio.
+      placeholder: "Input: Yeti X. Output: CABLE Input (VB-Audio Virtual Cable)"
+  - type: input
+    id: virtual-device
+    attributes:
+      label: Virtual audio device
+      description: Skip if the bug has nothing to do with audio.
+      placeholder: "VB-CABLE / BlackHole 2ch / PulseAudio null sink / none"
+  - type: textarea
+    id: log
+    attributes:
+      label: Error log
+      description: >
+        Contents of soundboard_error.log, if there is one. It sits next to
+        your config: %APPDATA%\Soundboard on Windows,
+        ~/.local/share/Soundboard on Linux, ~/Documents/Soundboard on
+        macOS, or the repo root when running from source.
+      render: shell

@@ -1,0 +1,32 @@
+name: Feature request
+description: Suggest something the app should do
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do
+      description: >
+        The situation you are in, not the solution you have in mind.
+        Knowing what you were doing when you wanted this often leads
+        somewhere different from the feature itself.
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: What you would like
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: What you do at the moment
+      description: A workaround, another app, or nothing.
+  - type: checkboxes
+    id: constraints
+    attributes:
+      label: Before submitting
+      options:
+        - label: This does not need a paid dependency or service. Soundboard stays entirely free and open-source.
+          required: true
