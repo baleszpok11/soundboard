@@ -34,20 +34,20 @@ jobs:
 
       - name: Build executable (Windows)
         if: runner.os == 'Windows'
-        run: pyinstaller --onefile --windowed --icon assets/icon.ico --add-data "assets/icon.png;assets" --collect-data customtkinter --collect-all yt_dlp --collect-all imageio_ffmpeg soundboard.py
+        run: pyinstaller --onefile --windowed --icon assets/icon.ico --add-data "assets/icon.png;assets" --collect-data customtkinter --collect-all yt_dlp --collect-all imageio_ffmpeg --collect-all pystray soundboard.py
 
       - name: Build executable (macOS)
         if: runner.os == 'macOS'
         run: |
           # A .app must be onedir; onefile .apps don't open reliably and can't be
           # granted Input Monitoring.
-          pyinstaller --onedir --windowed --icon assets/icon.icns --add-data "assets/icon.png:assets" --collect-data customtkinter --collect-all yt_dlp --collect-all imageio_ffmpeg soundboard.py
+          pyinstaller --onedir --windowed --icon assets/icon.icns --add-data "assets/icon.png:assets" --collect-data customtkinter --collect-all yt_dlp --collect-all imageio_ffmpeg --collect-all pystray soundboard.py
           plutil -insert NSMicrophoneUsageDescription -string "Soundboard mixes your microphone with sound clips and sends them to your virtual audio cable." dist/soundboard.app/Contents/Info.plist
           codesign --force --deep -s - dist/soundboard.app
 
       - name: Build executable (Linux)
         if: runner.os == 'Linux'
-        run: pyinstaller --onefile --windowed --add-data "assets/icon.png:assets" --collect-data customtkinter --collect-all yt_dlp --collect-all imageio_ffmpeg soundboard.py
+        run: pyinstaller --onefile --windowed --add-data "assets/icon.png:assets" --collect-data customtkinter --collect-all yt_dlp --collect-all imageio_ffmpeg --collect-all pystray soundboard.py
 
       - name: Package (Windows)
         if: runner.os == 'Windows'

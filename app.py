@@ -21,9 +21,10 @@ from editor_tab import EditorMixin
 from mic_hotkeys import MicHotkeyMixin
 from sound_list import SoundListMixin
 from theme import COLOR_BG, COLOR_ERROR, COLOR_ORANGE, COLOR_ORANGE_HOVER, COLOR_ROW, COLOR_SURFACE, COLOR_TEXT
+from tray import TrayMixin
 
 
-class Soundboard(DeviceMixin, MicHotkeyMixin, SoundListMixin, DownloadMixin, EditorMixin):
+class Soundboard(DeviceMixin, MicHotkeyMixin, SoundListMixin, DownloadMixin, EditorMixin, TrayMixin):
     def __init__(self, root):
         self.root = root
         self.root.title("Soundboard")
@@ -48,6 +49,7 @@ class Soundboard(DeviceMixin, MicHotkeyMixin, SoundListMixin, DownloadMixin, Edi
         self.audio_engine = AudioEngine()
         self.audio_engine.on_error = self._on_playback_error
         self.hotkey_listener = None
+        self.tray_icon = None
         self._pending_save = None
         self._output_was_up = False
         self._output_down_since = None
@@ -117,6 +119,8 @@ class Soundboard(DeviceMixin, MicHotkeyMixin, SoundListMixin, DownloadMixin, Edi
         self.audio_engine.preload(
             resolve_sound_path(s["path"]) for s in self.config["sounds"] if s.get("enabled", True)
         )
+        if self.config["close_to_tray"]:
+            self._start_tray()
 
     def _save_config_soon(self):
         # Sliders fire continuously while dragged; write once they settle.
@@ -128,11 +132,12 @@ class Soundboard(DeviceMixin, MicHotkeyMixin, SoundListMixin, DownloadMixin, Edi
         self._pending_save = None
         save_config(self.config)
 
-    def _on_close(self):
+    def _quit(self):
         if self._pending_save is not None:
             self.root.after_cancel(self._pending_save)
             self._flush_config()
         self.audio_engine.stop()
         if self.hotkey_listener is not None:
             self.hotkey_listener.stop()
+        self._stop_tray()
         self.root.destroy()
