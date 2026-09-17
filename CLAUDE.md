@@ -29,6 +29,9 @@ virtual audio cable.
   Monitoring/Accessibility permission is detected and shown as a warning
 - Errors: Tk callback errors and startup failures show a dialog and append
   to soundboard_error.log; config writes are atomic
+- Sharing: board_file.py reads/writes .sbboard files (links, not audio);
+  only sounds with a "source" can travel. downloader.fetch_clip() is the
+  one download path, used by both the Download tab and import
 - Bug reports: the dialog offers "Report bug"; reports go to the relay in
   relay/ (REPORT_URL in bug_report.py), falling back to a prefilled issue
   URL. Never put a GitHub token in the app - it can be extracted

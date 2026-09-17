@@ -266,6 +266,8 @@ class SoundListMixin:
                 self._build_sound_row(idx, sound)
         if hasattr(self, "editor_sound_menu"):
             self._refresh_editor_sound_list()
+        if hasattr(self, "export_summary"):
+            self._update_export_summary()
 
     def _build_sound_grid(self, visible):
         columns = self._grid_column_count()

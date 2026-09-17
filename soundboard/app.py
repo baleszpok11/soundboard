@@ -23,12 +23,14 @@ from .dialogs import ReportDialog, handle_exception
 from .download_tab import DownloadMixin
 from .editor_tab import EditorMixin
 from .mic_hotkeys import MicHotkeyMixin
+from .share_tab import ShareMixin
 from .sound_list import SoundListMixin
 from .theme import COLOR_BG, COLOR_ERROR, COLOR_ORANGE, COLOR_ORANGE_HOVER, COLOR_ROW, COLOR_SURFACE, COLOR_TEXT
 from .tray import TrayMixin
 
 
-class Soundboard(DeviceMixin, MicHotkeyMixin, SoundListMixin, DownloadMixin, EditorMixin, TrayMixin):
+class Soundboard(DeviceMixin, MicHotkeyMixin, SoundListMixin, DownloadMixin, EditorMixin,
+                 ShareMixin, TrayMixin):
     def __init__(self, root):
         self.root = root
         self.root.title("Soundboard")
@@ -106,7 +108,8 @@ class Soundboard(DeviceMixin, MicHotkeyMixin, SoundListMixin, DownloadMixin, Edi
         board_tab = self.tabview.add("Soundboard")
         download_tab = self.tabview.add("Download")
         editor_tab = self.tabview.add("Sound Editor")
-        for tab in (board_tab, download_tab, editor_tab):
+        share_tab = self.tabview.add("Import / Export")
+        for tab in (board_tab, download_tab, editor_tab, share_tab):
             tab.configure(fg_color=COLOR_BG)
 
         self._build_device_selectors(board_tab)
@@ -122,6 +125,7 @@ class Soundboard(DeviceMixin, MicHotkeyMixin, SoundListMixin, DownloadMixin, Edi
 
         self._build_download_tab(download_tab)
         self._build_editor_tab(editor_tab)
+        self._build_share_tab(share_tab)
 
         self._restart_audio_engine()
         self._poll_meters()

@@ -18,6 +18,8 @@ together, from one virtual microphone.
   without removing it from the board
 - Profiles: keep separate boards for different games or groups and switch
   between them, each with its own sounds and hotkeys
+- **Import / Export** tab: share a board as a small file of links, not
+  audio - whoever opens it downloads their own copy of each clip
 - Mixes your real microphone with soundboard clips in real time, so
   people hear both at once — no separate mixer app needed
 - Choose which microphone (input) and which virtual cable (output) are used
@@ -228,6 +230,25 @@ too; if so, leave it off.
   length along with the pitch (+12 st is twice as fast and half as long). If a bass boost would push the clip past full volume, it's
   turned down just enough to avoid distortion. The original file is not
   changed.
+
+### Sharing a board
+
+The **Import / Export** tab shares a board without moving any audio. An
+export lists each sound's name, hotkey, volume and the link it was
+downloaded from; whoever imports it downloads their own copy from those
+links. The file is a few kilobytes, and nothing is redistributed.
+
+- **Export:** choose the active profile or all of them. The summary says
+  how many sounds can be shared and names the ones that can't - anything
+  added from disk, or saved by the Sound Editor, has no link to rebuild
+  it from and is left out.
+- **Import:** pick a file and the links it contains are listed *before*
+  anything is downloaded, so you can see what a file someone sent you
+  would fetch. Choose whether it lands in a new profile or the one
+  you're on, then Import. Each clip is downloaded in turn and can be
+  cancelled; if a video has been taken down, that one is reported and
+  the rest still import. A hotkey already used in the destination
+  profile is dropped rather than shadowing the sound that has it.
 
 ### Where your data is stored
 

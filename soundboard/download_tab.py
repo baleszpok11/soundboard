@@ -1,25 +1,20 @@
 """The Download tab: fetching a clip with yt-dlp and adding it to the board."""
 
-import contextlib
-import glob
 import os
 import sys
 import threading
-import time
 import webbrowser
 
 import customtkinter as ctk
-import imageio_ffmpeg
 import yt_dlp
 import yt_dlp.version
 
-from .config import SOUNDS_DIR, ensure_sounds_dir
 from .downloader import (
     DOWNLOADER_STALE_DAYS,
     RELEASES_URL,
-    TrimAudioPP,
+    ClipUnavailable,
     downloader_age_days,
-    format_seconds,
+    fetch_clip,
     parse_time,
     source_for,
     update_hint,
@@ -151,97 +146,29 @@ class DownloadMixin:
             self.download_status.configure(text="Cancelling...", text_color=COLOR_TEXT)
 
     def _download_worker(self, url, start, end, cancel):
-        partial_files = set()
-        last_update = [0.0]
-
-        def report(fraction, text):
-            now = time.monotonic()
-            if fraction is not None and 0 < fraction < 1 and now - last_update[0] < 0.1:
-                return
-            last_update[0] = now
+        def progress(fraction, text):
             self.root.after(0, lambda: self._on_download_progress(cancel, fraction, text))
 
-        def on_download(d):
-            if d["status"] == "downloading":
-                partial_files.add(d["tmpfilename"])
-            elif d["status"] == "finished" and partial_files:
-                partial_files.add(d["filename"])
-            if cancel.is_set():
-                raise yt_dlp.utils.DownloadCancelled()
-            if d["status"] != "downloading":
-                return
-            done = d.get("downloaded_bytes") or 0
-            total = d.get("total_bytes") or d.get("total_bytes_estimate")
-            if total:
-                report(min(done / total, 1.0), f"Downloading... {done / total:.0%} of {total / 1e6:.1f} MB")
-            else:
-                report(None, f"Downloading... {done / 1e6:.1f} MB")
-
-        def on_postprocess(d):
-            if d["status"] != "started":
-                return
-            if cancel.is_set():
-                # Only files this download created are removed.
-                if partial_files:
-                    partial_files.add(d["info_dict"]["filepath"])
-                raise yt_dlp.utils.DownloadCancelled()
-            text = "Trimming..." if d["postprocessor"] == "TrimAudio" else "Converting to MP3..."
-            report(1.0, text)
-
         try:
-            ensure_sounds_dir()
-            ffmpeg_path = imageio_ffmpeg.get_ffmpeg_exe()
-            # The id keeps different videos with the same title apart; yt-dlp
-            # would otherwise reuse the existing file. A time range gets its own name.
-            suffix = ""
-            if start is not None or end is not None:
-                suffix = f" {format_seconds(start or 0)}-{format_seconds(end) if end is not None else 'end'}"
-            outtmpl = os.path.join(SOUNDS_DIR, "%(title).100s [%(id)s]" + suffix + ".%(ext)s")
-            ydl_opts = {
-                "format": "bestaudio/best",
-                "outtmpl": outtmpl,
-                "ffmpeg_location": ffmpeg_path,
-                "postprocessors": [{
-                    "key": "FFmpegExtractAudio",
-                    "preferredcodec": "mp3",
-                    "preferredquality": "192",
-                }],
-                "progress_hooks": [on_download],
-                "postprocessor_hooks": [on_postprocess],
-                "noplaylist": True,
-                "quiet": True,
-                "no_warnings": True,
-                "noprogress": True,
-            }
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                if suffix:
-                    ydl.add_post_processor(TrimAudioPP(ydl, start, end), when="post_process")
-                info = ydl.extract_info(url, download=False, process=False)
-                message = None
-                if info.get("is_live") or info.get("live_status") == "is_live":
-                    message = "Live streams can't be downloaded."
-                elif start and info.get("duration") and start >= info["duration"]:
-                    message = "The start time is past the end of the video."
-                if message:
-                    self.root.after(0, lambda: self._on_download_error(message, hint=False))
-                    return
-                info = ydl.process_ie_result(info, download=True)
-                base = ydl.prepare_filename(info)
-                final_path = os.path.splitext(base)[0] + ".mp3"
-                title = info.get("title") or os.path.splitext(os.path.basename(final_path))[0]
+            path, title = fetch_clip(url, start, end, progress, cancel)
+        except ClipUnavailable as e:
+            message = str(e)
+            self.root.after(0, lambda: self._on_download_error(message, hint=False))
+            return
+        except yt_dlp.utils.DownloadCancelled:
+            self.root.after(0, self._on_download_cancelled)
+            return
         except Exception as e:
             if cancel.is_set():
-                for path in partial_files:
-                    for leftover in [path, path.removesuffix(".part") + ".ytdl", *glob.glob(glob.escape(path) + "-Frag*")]:
-                        with contextlib.suppress(OSError):
-                            os.remove(leftover)
                 self.root.after(0, self._on_download_cancelled)
-            else:
-                message = str(e)
-                self.root.after(0, lambda: self._on_download_error(message))
+                return
+            message = str(e)
+            self.root.after(0, lambda: self._on_download_error(message))
             return
+        # Keep where it came from and how it was trimmed, so the same clip
+        # can be rebuilt from a shared board file.
         source = source_for(url, start, end)
-        self.root.after(0, lambda: self._on_download_done(final_path, title, source))
+        self.root.after(0, lambda: self._on_download_done(path, title, source))
 
     def _on_download_progress(self, cancel, fraction, text):
         if cancel is not self._download_cancel or cancel.is_set():
