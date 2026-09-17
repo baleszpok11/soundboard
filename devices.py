@@ -8,19 +8,25 @@ from tkinter import messagebox
 
 import customtkinter as ctk
 
-from audio_engine import sd
+from audio_engine import SAMPLE_RATE, sd, test_tone
 from config import save_config
 from theme import (
     COLOR_BG,
+    COLOR_ERROR,
     COLOR_ORANGE,
     COLOR_ORANGE_HOVER,
     COLOR_ROW,
     COLOR_SURFACE,
     COLOR_TEXT,
+    COLOR_TEXT_DIM,
     VOLUME_MAX,
 )
 
 NO_DEVICE_LABEL = "(none)"
+METER_POLL_MS = 50
+METER_DECAY = 0.08  # how far a meter falls per tick when the signal drops
+METER_HOT = 0.95  # at or above this the meter turns red
+TEST_TONE_KEY = "test-tone"
 RECONNECT_INTERVAL_S = 5.0
 RECONNECT_WINDOW_S = 120.0
 # On Windows every device is listed once per host API; show one API only.
@@ -122,8 +128,11 @@ class DeviceMixin:
         input_names = [name for _, name in self.input_devices]
         current_input = self.config.get("input_device")
         self.input_var = tk.StringVar(value=current_input or NO_DEVICE_LABEL)
+        # A cell frame, so the level meter can sit under the menu.
+        input_box = ctk.CTkFrame(frame, fg_color="transparent")
+        input_box.grid(row=0, column=1, sticky="ew", padx=8, pady=8)
         self.input_menu = ctk.CTkOptionMenu(
-            frame,
+            input_box,
             variable=self.input_var,
             values=input_names,
             command=self._on_input_device_change,
@@ -133,7 +142,8 @@ class DeviceMixin:
             text_color=COLOR_TEXT,
             dropdown_fg_color=COLOR_ROW,
         )
-        self.input_menu.grid(row=0, column=1, sticky="ew", padx=8, pady=8)
+        self.input_menu.pack(fill="x")
+        self.input_meter = self._build_meter(input_box)
         ctk.CTkButton(
             frame, text="Refresh devices", command=self.refresh_devices,
             fg_color=COLOR_ROW, hover_color=COLOR_SURFACE, text_color=COLOR_ORANGE,
@@ -146,8 +156,10 @@ class DeviceMixin:
         output_names = [name for _, name in self.output_devices]
         current_output = self.config.get("output_device")
         self.output_var = tk.StringVar(value=current_output or NO_DEVICE_LABEL)
+        output_box = ctk.CTkFrame(frame, fg_color="transparent")
+        output_box.grid(row=1, column=1, sticky="ew", padx=8, pady=8)
         self.output_menu = ctk.CTkOptionMenu(
-            frame,
+            output_box,
             variable=self.output_var,
             values=output_names,
             command=self._on_output_device_change,
@@ -157,10 +169,13 @@ class DeviceMixin:
             text_color=COLOR_TEXT,
             dropdown_fg_color=COLOR_ROW,
         )
-        self.output_menu.grid(row=1, column=1, sticky="ew", padx=8, pady=8)
+        self.output_menu.pack(fill="x")
+        self.output_meter = self._build_meter(output_box)
 
+        output_side = ctk.CTkFrame(frame, fg_color="transparent")
+        output_side.grid(row=1, column=2, sticky="w", padx=8, pady=8)
         self.hear_self_checkbox = ctk.CTkCheckBox(
-            frame,
+            output_side,
             text="Hear soundboard",
             fg_color=COLOR_ORANGE,
             hover_color=COLOR_ORANGE_HOVER,
@@ -172,12 +187,64 @@ class DeviceMixin:
         else:
             self.hear_self_checkbox.deselect()
         self.hear_self_checkbox.configure(command=self._on_toggle_hear_self)
-        self.hear_self_checkbox.grid(row=1, column=2, sticky="w", padx=8, pady=8)
+        self.hear_self_checkbox.pack(side="left")
+        ctk.CTkButton(
+            output_side, text="Test", width=60, command=self.test_output,
+            fg_color=COLOR_ROW, hover_color=COLOR_SURFACE, text_color=COLOR_ORANGE,
+            border_width=1, border_color=COLOR_ORANGE,
+        ).pack(side="left", padx=(8, 0))
 
         self._add_volume_row(frame, 2, "Mic volume:", "mic_volume", "mic_gain")
         self._add_volume_row(frame, 3, "Soundboard volume:", "sound_volume", "sound_gain")
         self._build_mic_controls(frame, 4)
         self._build_startup_controls(frame, 5)
+
+    # -- level meters ---------------------------------------------------
+
+    @staticmethod
+    def _build_meter(parent):
+        meter = ctk.CTkProgressBar(
+            parent, height=4, corner_radius=0, fg_color=COLOR_ROW, progress_color=COLOR_ROW,
+        )
+        meter.set(0)
+        meter.pack(fill="x", pady=(3, 0))
+        meter.level = 0.0  # decayed value, so the bar falls instead of flickering
+        return meter
+
+    def _poll_meters(self):
+        engine = self.audio_engine
+        # The mic meter shows the raw signal even while muted, so "my mic
+        # is dead" and "my mic is muted" don't look the same.
+        live = engine.mic_enabled and not self.config["mic_muted"]
+        self._update_meter(self.input_meter, engine.input_peak, engine.input_stream is not None, live)
+        self._update_meter(self.output_meter, engine.output_peak, engine.output_stream is not None, True)
+        self._meter_poll = self.root.after(METER_POLL_MS, self._poll_meters)
+
+    @staticmethod
+    def _update_meter(meter, peak, connected, live):
+        if not connected:
+            meter.level = 0.0
+            meter.set(0)
+            meter.configure(progress_color=COLOR_ROW)
+            return
+        # Rise instantly, fall gradually, so short peaks stay readable.
+        meter.level = max(min(peak, 1.0), meter.level - METER_DECAY)
+        meter.set(meter.level)
+        if not live:
+            color = COLOR_TEXT_DIM  # picking up sound, but nothing is going out
+        elif meter.level >= METER_HOT:
+            color = COLOR_ERROR
+        else:
+            color = COLOR_ORANGE
+        meter.configure(progress_color=color)
+
+    def test_output(self):
+        """Play a tone through the output device, so routing can be
+        checked without asking someone else if they can hear you."""
+        try:
+            self.audio_engine.play_data(test_tone(), SAMPLE_RATE, key=TEST_TONE_KEY)
+        except RuntimeError as e:
+            messagebox.showerror("Test output", str(e))
 
     def _add_volume_row(self, frame, row, text, config_key, engine_attr):
         ctk.CTkLabel(frame, text=text, text_color=COLOR_TEXT).grid(row=row, column=0, sticky="w", padx=8, pady=6)

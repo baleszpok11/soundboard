@@ -19,6 +19,9 @@ together, from one virtual microphone.
 - Mixes your real microphone with soundboard clips in real time, so
   people hear both at once — no separate mixer app needed
 - Choose which microphone (input) and which virtual cable (output) are used
+- Level meters under both device pickers, plus a "Test" button that sends
+  a tone to the output, so you can see your routing works without asking
+  someone if they can hear you
 - "Hear soundboard" toggle plays clips on your own speakers/headphones
   too — turning it off doesn't affect what others hear through the
   virtual cable
@@ -127,6 +130,14 @@ too; if so, leave it off.
 - **Virtual mic output:** the virtual cable that Discord/games should use
   as their microphone input. Pick `(none)` to disable a side if you don't
   need it (e.g. no mic passthrough).
+- **Level meters:** the thin bar under each device shows its current
+  level. The mic meter moves even while muted or while push-to-talk
+  isn't held, but goes grey instead of orange - so a mic that isn't
+  working looks different from one that's simply muted. A meter turns
+  red when the signal is close to clipping.
+- **Test:** plays a short tone through the virtual mic output. The output
+  meter should move; anyone listening to that cable should hear it. Use
+  it to confirm routing before going live.
 - **Refresh devices:** rescans your audio devices, e.g. after plugging in
   a headset or installing a virtual cable, without restarting the app.
   A selected device that isn't connected is shown in red. If the virtual

@@ -28,6 +28,10 @@ CLIP_CACHE_BYTES = 512 * 1024 * 1024  # decoded clips kept in memory
 LIMITER_CEILING = 0.89  # about -1 dBFS
 LIMITER_RELEASE_S = 0.3
 STREAM_TIMEOUT_S = 2.0  # a running stream with no callbacks for this long is treated as lost
+TEST_TONE_S = 0.8
+TEST_TONE_HZ = 440.0
+TEST_TONE_LEVEL = 0.4
+TEST_TONE_FADE_S = 0.05
 
 
 def _resample(data, orig_sr, target_sr):
@@ -83,6 +87,16 @@ def apply_bass(data, gain_db, sample_rate, cutoff_hz=BASS_CUTOFF_HZ):
     return filtered.astype(np.float32)
 
 
+def test_tone(seconds=TEST_TONE_S, hz=TEST_TONE_HZ):
+    """A short sine for checking that audio reaches the output device.
+    Faded at both ends so it can't click."""
+    frames = int(SAMPLE_RATE * seconds)
+    t = np.arange(frames, dtype=np.float32) / SAMPLE_RATE
+    wave = TEST_TONE_LEVEL * np.sin(2 * np.pi * hz * t).astype(np.float32)
+    fade = np.minimum(1.0, np.minimum(t, seconds - t) / TEST_TONE_FADE_S).astype(np.float32)
+    return (wave * fade).reshape(-1, 1).repeat(CHANNELS, axis=1)
+
+
 class _ActiveSound:
     def __init__(self, data, key=None, gain=1.0, loop=False):
         self.data = data
@@ -124,11 +138,13 @@ class _Limiter:
 
     def __init__(self):
         self.gain = 1.0
+        self.peak = 0.0  # last block's peak, reused by the output meter
         blocks_per_second = SAMPLE_RATE / BLOCK_SIZE
         self.release = 1.0 - np.exp(-1.0 / (LIMITER_RELEASE_S * blocks_per_second))
 
     def process(self, block):
         peak = float(np.abs(block).max()) if block.size else 0.0
+        self.peak = peak
         target = min(1.0, LIMITER_CEILING / peak) if peak > 0 else 1.0
         if target < self.gain:
             # A downward ramp would let the start of the block overshoot.
@@ -164,6 +180,10 @@ class AudioEngine:
         self._active_sounds = []
         self._active_sounds_monitor = []
         self.dropouts = 0
+        # Last block's peak on each side, for the level meters. Written
+        # from the audio callbacks, read by the UI timer.
+        self.input_peak = 0.0
+        self.output_peak = 0.0
         self.mic_gain = 1.0
         self.mic_enabled = True  # False while muted or push-to-talk isn't held
         self._mic_level = 1.0  # gain applied to the last block, for smooth changes
@@ -258,6 +278,8 @@ class AudioEngine:
             self._active_sounds = []
             self._active_sounds_monitor = []
             self.dropouts = 0
+            self.input_peak = 0.0
+            self.output_peak = 0.0
             self._output_limiter = _Limiter()
             self._monitor_limiter = _Limiter()
 
@@ -327,6 +349,7 @@ class AudioEngine:
         with self._lock:
             if status:
                 self.dropouts += 1
+            self.input_peak = float(np.abs(indata).max()) if indata.size else 0.0
             self._mic_buffer.append(indata.copy())
             self._mic_frames += len(indata)
             while self._mic_frames > MIC_MAX_FRAMES:
@@ -347,6 +370,7 @@ class AudioEngine:
                 mixed *= target
             mixed += self._mix_sounds("_active_sounds", frames, self.output_channels)
         outdata[:] = self._output_limiter.process(mixed)
+        self.output_peak = self._output_limiter.peak
 
     def _on_monitor_output(self, outdata, frames, time_info, status):
         with self._lock:
