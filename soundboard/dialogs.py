@@ -1,6 +1,8 @@
 """Small modal dialogs: a one-line text prompt, the hotkey recorder, the
 error dialog and the bug report window."""
 
+import os
+import tempfile
 import threading
 import tkinter as tk
 import traceback
@@ -9,6 +11,7 @@ import webbrowser
 import customtkinter as ctk
 
 from . import bug_report
+from . import updater
 from .config import write_error_log
 from .hotkeys import MODIFIER_ORDER, hotkey_part_for_key, modifier_for_keysym
 from .theme import (
@@ -402,3 +405,190 @@ class ReportDialog(ctk.CTkToplevel):
             ),
             text_color=COLOR_ORANGE,
         )
+
+
+class UpdateDialog(ctk.CTkToplevel):
+    """Offers a new release, downloads it and installs it. Nothing is
+    replaced until Install is pressed, and a failure leaves the running
+    build alone."""
+
+    NOTES_LINES = 12
+
+    def __init__(self, parent, release, config=None, on_skip=None):
+        super().__init__(parent)
+        self.title("Update available")
+        self.configure(fg_color=COLOR_SURFACE)
+        self.release = release
+        self.config_data = config
+        self._on_skip = on_skip
+        self._cancelled = False
+        self._busy = False
+        self._temp_dir = None
+
+        ctk.CTkLabel(
+            self, text=f"Soundboard {release.version} is available.",
+            text_color=COLOR_ORANGE, anchor="w",
+            font=ctk.CTkFont(size=15, weight="bold"),
+        ).pack(anchor="w", padx=16, pady=(16, 2))
+        ctk.CTkLabel(
+            self, text=f"You are running {updater.APP_VERSION}.",
+            text_color=COLOR_TEXT_DIM, anchor="w",
+        ).pack(anchor="w", padx=16, pady=(0, 8))
+
+        if release.notes:
+            notes = tk.Text(
+                self, height=self.NOTES_LINES, width=64, wrap="word",
+                bg=COLOR_ROW, fg=COLOR_TEXT, relief="flat", padx=10, pady=8,
+                highlightthickness=0,
+            )
+            notes.insert("1.0", release.notes)
+            notes.configure(state="disabled")
+            notes.pack(fill="both", expand=True, padx=16, pady=(0, 8))
+
+        self.status = ctk.CTkLabel(
+            self, text=self._opening_status(), text_color=COLOR_TEXT,
+            anchor="w", justify="left", wraplength=460,
+        )
+        self.status.pack(fill="x", padx=16, pady=(0, 6))
+        self.progress = ctk.CTkProgressBar(self, progress_color=COLOR_ORANGE, fg_color=COLOR_ROW)
+        self.progress.set(0)
+
+        buttons = ctk.CTkFrame(self, fg_color=COLOR_SURFACE)
+        buttons.pack(fill="x", padx=16, pady=(0, 16))
+        self.close_button = ctk.CTkButton(
+            buttons, text="Later", width=90, command=self._close,
+            fg_color=COLOR_ROW, hover_color=COLOR_BG, text_color=COLOR_ORANGE,
+            border_width=1, border_color=COLOR_ORANGE,
+        )
+        self.close_button.pack(side="right")
+        self.skip_button = ctk.CTkButton(
+            buttons, text="Skip this version", width=140, command=self._skip,
+            fg_color=COLOR_ROW, hover_color=COLOR_BG, text_color=COLOR_ORANGE,
+            border_width=1, border_color=COLOR_ORANGE,
+        )
+        self.skip_button.pack(side="right", padx=(0, 6))
+        self.action_button = ctk.CTkButton(
+            buttons, text=self._action_text(), width=150, command=self._start,
+            fg_color=COLOR_ORANGE, hover_color=COLOR_ORANGE_HOVER, text_color=COLOR_BG,
+        )
+        self.action_button.pack(side="right", padx=(0, 6))
+        ctk.CTkButton(
+            buttons, text="Release page", width=110,
+            command=lambda: webbrowser.open(updater.RELEASES_PAGE),
+            fg_color=COLOR_ROW, hover_color=COLOR_BG, text_color=COLOR_ORANGE,
+            border_width=1, border_color=COLOR_ORANGE,
+        ).pack(side="left")
+
+        self.protocol("WM_DELETE_WINDOW", self._close)
+        self.transient(parent)
+
+    def _action_text(self):
+        return "Download and install" if updater.can_self_update() else "Download"
+
+    def _opening_status(self):
+        if not updater.is_frozen():
+            return "This is a source checkout, so there is nothing here to replace."
+        if updater.can_self_update():
+            return "Soundboard will restart once the update is installed."
+        return (
+            "Downloaded updates have to be installed by hand on this system: "
+            "the app is unsigned, and a replacement copied in automatically can "
+            "be blocked from opening."
+        )
+
+    # -- running ---------------------------------------------------------
+
+    def _start(self):
+        if self._busy:
+            return
+        self._busy = True
+        self._cancelled = False
+        self.action_button.configure(text="Cancel", command=self._cancel)
+        self.skip_button.configure(state="disabled")
+        self.progress.set(0)
+        self.progress.pack(fill="x", padx=16, pady=(0, 8), before=self.status)
+        self.status.configure(text="Downloading...")
+        self._temp_dir = tempfile.mkdtemp(prefix="soundboard-update-")
+        threading.Thread(target=self._work, daemon=True).start()
+
+    def _cancel(self):
+        self._cancelled = True
+        self.status.configure(text="Cancelling...")
+
+    def _work(self):
+        """Download, then install. Runs off the main thread; every UI
+        touch goes back through after()."""
+        try:
+            path = updater.download(
+                self.release, self._temp_dir,
+                on_progress=self._report_progress,
+                cancel=lambda: self._cancelled,
+            )
+        except updater.UpdateError as e:
+            self._finish(str(e))
+            return
+        if not updater.can_self_update():
+            self._finish(
+                f"Downloaded to {path}. Install it over your current copy, then reopen Soundboard.",
+                reveal=path,
+            )
+            return
+        self._post(lambda: self.status.configure(text="Installing..."))
+        try:
+            updater.apply(path)
+        except updater.UpdateError as e:
+            self._finish(str(e))
+            return
+        # apply() has already started the new build.
+        self._post(self._quit_for_relaunch)
+
+    def _report_progress(self, done, total):
+        if total:
+            self._post(lambda: self.progress.set(done / total))
+            megabytes = f"{done / 1048576:.0f} of {total / 1048576:.0f} MB"
+        else:
+            megabytes = f"{done / 1048576:.0f} MB"
+        self._post(lambda: self.status.configure(text=f"Downloading... {megabytes}"))
+
+    def _post(self, call):
+        """Hop back to the Tk thread, ignoring a window already closed."""
+        try:
+            self.after(0, call)
+        except tk.TclError:
+            pass
+
+    def _finish(self, message, reveal=None):
+        def done():
+            self._busy = False
+            self.progress.pack_forget()
+            self.status.configure(text=message)
+            self.action_button.configure(text=self._action_text(), command=self._start)
+            self.skip_button.configure(state="normal")
+            if reveal:
+                updater.reveal(reveal)
+        self._post(done)
+
+    def _quit_for_relaunch(self):
+        self.status.configure(text="Restarting...")
+        self.update_idletasks()
+        master = self.master
+        self.destroy()
+        try:
+            master.winfo_toplevel().quit()
+        except tk.TclError:
+            pass
+        os._exit(0)
+
+    # -- closing ---------------------------------------------------------
+
+    def _skip(self):
+        if self.config_data is not None:
+            self.config_data["skipped_version"] = self.release.version
+            if self._on_skip is not None:
+                self._on_skip()
+        self._close()
+
+    def _close(self):
+        if self._busy:
+            self._cancelled = True
+        self.destroy()

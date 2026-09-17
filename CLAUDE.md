@@ -48,6 +48,16 @@ virtual audio cable.
   tools/make_tutorial_shots.py (needs a display: xvfb-run works), which
   crops to widget geometry rather than fixed pixels, so re-run it after
   a UI change instead of shipping help for an app that no longer exists
+- Updates: updater.py asks the GitHub releases API on startup, on a
+  worker thread, and a failed check is silent - the button in the header
+  row simply never appears. Only frozen builds replace themselves.
+  Linux renames the new binary over the old path (the running process
+  keeps its inode); Windows moves the running .exe aside first, since it
+  can be renamed but not written or deleted, and the leftover .old is
+  cleared on the next start; macOS only downloads and reveals, because
+  the .app is ad-hoc signed and a swapped-in copy can be quarantined out
+  of launching. APP_VERSION and the release tag must agree or the
+  comparison is meaningless, so CI fails a tag build when they do not
 - Errors: Tk callback errors and startup failures show a dialog and append
   to soundboard_error.log; config writes are atomic
 - Sharing: board_file.py reads/writes .sbboard files (links, not audio);

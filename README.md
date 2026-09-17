@@ -44,6 +44,8 @@ together, from one virtual microphone.
   of each other, choose whether loud edits stay clean or clip, and pile
   on effects (treble, mid, drive, robot, echo, stutter, width,
   telephone, reverse), with a waveform view, preview and undo
+- Checks for new releases and installs them for you (Windows and Linux;
+  on macOS it downloads and you drag it over)
 - Optionally start with the computer and keep running in the tray /
   menu bar when the window is closed, so hotkeys still work
 - All sounds live in one `Sounds/` folder

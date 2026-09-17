@@ -97,6 +97,8 @@ def load_config():
     config.setdefault("ptt_hotkey", None)
     config.setdefault("sound_view", "list")
     config.setdefault("close_to_tray", False)
+    config.setdefault("check_for_updates", True)
+    config.setdefault("skipped_version", None)
     _load_profiles(config)
     return config
 
