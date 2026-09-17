@@ -40,6 +40,18 @@ def parse_time(text):
     return float(seconds)
 
 
+def source_for(url, start, end):
+    """Where a clip came from, kept on the board entry so it can be shared
+    as a link and rebuilt. Times are only recorded when the clip was
+    actually trimmed."""
+    source = {"url": url}
+    if start is not None:
+        source["start"] = start
+    if end is not None:
+        source["end"] = end
+    return source
+
+
 def format_seconds(seconds):
     """Filename-safe time label like 1m05s."""
     minutes, secs = divmod(seconds, 60)
