@@ -28,7 +28,8 @@ Builds `Soundboard Test.app` next to the real app, installs it in
    - Current branch: build from a copy of the checkout (the working tree may
      change while the build runs):
      `SRC=$SCRATCH/testbuild-src; rm -rf "$SRC"; mkdir -p "$SRC"; git archive HEAD | tar -x -C "$SRC"`
-     (add uncommitted changes with `cp soundboard.py "$SRC"/` if needed).
+     (add uncommitted changes with `cp main.py "$SRC"/` and
+     `cp soundboard/*.py "$SRC"/soundboard/` if needed).
    - Several unmerged branches: `git worktree add -b test-combined "$SCRATCH/testbuild" master`,
      merge each branch there, resolve conflicts, run the tests on the result,
      then use that worktree as `SRC`. Remove the worktree and the branch
@@ -40,7 +41,7 @@ Builds `Soundboard Test.app` next to the real app, installs it in
      --icon "$SRC/assets/icon.icns" --add-data "$SRC/assets/icon.png:assets" \
      --collect-data customtkinter --collect-all yt_dlp --collect-all imageio_ffmpeg \
      --distpath "$OUT/dist" --workpath "$OUT/build" --specpath "$OUT" \
-     "$SRC/soundboard.py" > "$OUT/log.txt" 2>&1
+     "$SRC/main.py" > "$OUT/log.txt" 2>&1
    APP="$OUT/dist/Soundboard Test.app"
    plutil -insert NSMicrophoneUsageDescription -string "Soundboard uses your microphone." "$APP/Contents/Info.plist"
    codesign --force --deep -s - "$APP" && codesign -v "$APP"

@@ -11,7 +11,7 @@ from tkinter import filedialog, messagebox
 
 import customtkinter as ctk
 
-from config import (
+from .config import (
     SOUNDS_DIR,
     ensure_sounds_dir,
     resolve_sound_path,
@@ -20,8 +20,8 @@ from config import (
     save_config,
     unique_path,
 )
-from dialogs import TextDialog
-from theme import (
+from .dialogs import TextDialog
+from .theme import (
     COLOR_BG,
     COLOR_ERROR,
     COLOR_ORANGE,

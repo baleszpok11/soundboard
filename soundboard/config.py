@@ -12,13 +12,17 @@ import re
 import sys
 import tempfile
 
+# This package sits one level below the project root, which is where the
+# config, Sounds/ and assets/ live when running from source.
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
 
 def _data_dir():
     # A PyInstaller onefile build runs from a temp dir that is deleted on
     # exit, so user data must live elsewhere. macOS .app bundles may be
     # read-only (app translocation), so they use ~/Documents/Soundboard.
     if not getattr(sys, "frozen", False):
-        return os.path.dirname(os.path.abspath(__file__))
+        return _PROJECT_ROOT
     if sys.platform == "darwin":
         path = os.path.join(os.path.expanduser("~"), "Documents", "Soundboard")
         os.makedirs(path, exist_ok=True)
@@ -30,7 +34,7 @@ APP_VERSION = "0.7.0"  # bump before tagging a release
 APP_DIR = _data_dir()
 CONFIG_PATH = os.path.join(APP_DIR, "soundboard_config.json")
 SOUNDS_DIR = os.path.join(APP_DIR, "Sounds")
-ASSETS_DIR = os.path.join(getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__))), "assets")
+ASSETS_DIR = os.path.join(getattr(sys, "_MEIPASS", _PROJECT_ROOT), "assets")
 ICON_PATH = os.path.join(ASSETS_DIR, "icon.png")
 
 

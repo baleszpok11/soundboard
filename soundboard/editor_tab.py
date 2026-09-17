@@ -8,15 +8,15 @@ import customtkinter as ctk
 import numpy as np
 import soundfile as sf
 
-from audio_engine import _resample, apply_bass
-from config import (
+from .audio_engine import _resample, apply_bass
+from .config import (
     SOUNDS_DIR,
     ensure_sounds_dir,
     resolve_sound_path,
     sanitize_filename,
     unique_path,
 )
-from theme import (
+from .theme import (
     COLOR_BG,
     COLOR_ERROR,
     COLOR_ORANGE,

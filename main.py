@@ -6,10 +6,10 @@ microphone. Includes a media downloader tab (yt-dlp) that saves clips
 into the local Sounds/ folder, and a Sound Editor tab to trim clips and
 adjust bass.
 
-This file only starts the app; the UI lives in app.py and its mixins
-(devices, sound_list, mic_hotkeys, download_tab, editor_tab), with
-audio_engine.py, hotkeys.py, dialogs.py, downloader.py and config.py
-underneath.
+This file only starts the app. Everything else lives in the soundboard
+package: app.py and its mixins (devices, sound_list, mic_hotkeys,
+download_tab, editor_tab), over audio_engine.py, hotkeys.py, dialogs.py,
+downloader.py and config.py.
 """
 
 import sys
@@ -18,10 +18,10 @@ import traceback
 
 import customtkinter as ctk
 
-from app import Soundboard
-from audio_engine import PORTAUDIO_ERROR, sd
-from config import ICON_PATH, write_error_log
-from dialogs import handle_exception, show_error
+from soundboard.app import Soundboard
+from soundboard.audio_engine import PORTAUDIO_ERROR, sd
+from soundboard.config import ICON_PATH, write_error_log
+from soundboard.dialogs import handle_exception, show_error
 
 
 def _show_startup_error(root):

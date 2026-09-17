@@ -6,8 +6,8 @@ from tkinter import messagebox
 
 import customtkinter as ctk
 
-from audio_engine import AudioEngine
-from config import (
+from .audio_engine import AudioEngine
+from .config import (
     CONFIG_PATH,
     ensure_sounds_dir,
     load_config,
@@ -15,15 +15,15 @@ from config import (
     save_config,
     unique_path,
 )
-from audio_engine import sd
-from devices import DeviceMixin
-from dialogs import ReportDialog, handle_exception
-from download_tab import DownloadMixin
-from editor_tab import EditorMixin
-from mic_hotkeys import MicHotkeyMixin
-from sound_list import SoundListMixin
-from theme import COLOR_BG, COLOR_ERROR, COLOR_ORANGE, COLOR_ORANGE_HOVER, COLOR_ROW, COLOR_SURFACE, COLOR_TEXT
-from tray import TrayMixin
+from .audio_engine import sd
+from .devices import DeviceMixin
+from .dialogs import ReportDialog, handle_exception
+from .download_tab import DownloadMixin
+from .editor_tab import EditorMixin
+from .mic_hotkeys import MicHotkeyMixin
+from .sound_list import SoundListMixin
+from .theme import COLOR_BG, COLOR_ERROR, COLOR_ORANGE, COLOR_ORANGE_HOVER, COLOR_ROW, COLOR_SURFACE, COLOR_TEXT
+from .tray import TrayMixin
 
 
 class Soundboard(DeviceMixin, MicHotkeyMixin, SoundListMixin, DownloadMixin, EditorMixin, TrayMixin):

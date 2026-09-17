@@ -69,7 +69,7 @@ blank window; use Homebrew instead (`brew install python@3.12 python-tk@3.12`).
 3. Run:
 
    ```
-   python soundboard.py
+   python main.py
    ```
 
 ### Virtual audio device by platform
@@ -222,7 +222,7 @@ too; if so, leave it off.
 ### Where your data is stored
 
 `soundboard_config.json` and the `Sounds/` folder live:
-- next to `soundboard.py` when running from source
+- next to `main.py` when running from source
 - next to the executable on Windows/Linux builds
 - in `~/Documents/Soundboard` for the macOS app (macOS asks for
   permission to use Documents on first launch)
@@ -237,15 +237,15 @@ pip install -r build-requirements.txt
 COLLECT="--collect-data customtkinter --collect-all yt_dlp --collect-all imageio_ffmpeg --collect-all pystray"
 
 # Windows
-pyinstaller --onefile --windowed --icon assets/icon.ico --add-data "assets/icon.png;assets" $COLLECT soundboard.py
+pyinstaller --onefile --windowed --icon assets/icon.ico --add-data "assets/icon.png;assets" $COLLECT --name soundboard main.py
 
 # macOS
-pyinstaller --onedir --windowed --icon assets/icon.icns --add-data "assets/icon.png:assets" $COLLECT soundboard.py
+pyinstaller --onedir --windowed --icon assets/icon.icns --add-data "assets/icon.png:assets" $COLLECT --name soundboard main.py
 plutil -insert NSMicrophoneUsageDescription -string "Soundboard uses your microphone." dist/soundboard.app/Contents/Info.plist
 codesign --force --deep -s - dist/soundboard.app
 
 # Linux
-pyinstaller --onefile --windowed --add-data "assets/icon.png:assets" $COLLECT soundboard.py
+pyinstaller --onefile --windowed --add-data "assets/icon.png:assets" $COLLECT --name soundboard main.py
 ```
 
 The executable is written to `dist/`. On macOS, build with `--onedir`:
