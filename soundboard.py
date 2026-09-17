@@ -15,22 +15,13 @@ underneath.
 import sys
 import tkinter as tk
 import traceback
-from tkinter import messagebox
 
 import customtkinter as ctk
 
 from app import Soundboard
 from audio_engine import PORTAUDIO_ERROR, sd
 from config import ICON_PATH, write_error_log
-
-
-def _report_callback_exception(exc_type, exc_value, exc_tb):
-    """Windowed builds have no console, so show UI errors instead of
-    losing them."""
-    text = "".join(traceback.format_exception(exc_type, exc_value, exc_tb))
-    log_path = write_error_log(text)
-    details = f"\n\nDetails were saved to:\n{log_path}" if log_path else ""
-    messagebox.showerror("Unexpected error", f"{exc_value}{details}")
+from dialogs import handle_exception, show_error
 
 
 def _show_startup_error(root):
@@ -49,7 +40,7 @@ def _show_startup_error(root):
         if root is None:
             root = tk.Tk()
         root.withdraw()
-        messagebox.showerror("Soundboard", message, parent=root)
+        show_error(root, "Soundboard", message)
         root.destroy()
     except Exception:
         pass
@@ -79,7 +70,8 @@ def main():
         ctk.set_appearance_mode("dark")
         ctk.set_default_color_theme("dark-blue")
         root = ctk.CTk()
-        root.report_callback_exception = _report_callback_exception
+        # Soundboard swaps this for one that knows the config once it is up.
+        root.report_callback_exception = lambda *exc: handle_exception(root, *exc)
         root.geometry("900x700")
         root.minsize(640, 480)
         try:

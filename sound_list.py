@@ -310,6 +310,11 @@ class SoundListMixin:
         )
         self.stop_hotkey_button.pack(side="left", padx=(8, 0))
         self._update_stop_hotkey_button()
+        ctk.CTkButton(
+            frame, text="Report a bug", width=110, command=self.report_bug,
+            fg_color=COLOR_ROW, hover_color=COLOR_SURFACE, text_color=COLOR_ORANGE,
+            border_width=1, border_color=COLOR_ORANGE,
+        ).pack(side="right", padx=(8, 0))
         self.dropout_label = ctk.CTkLabel(frame, text="", text_color=COLOR_TEXT_DIM)
         self.dropout_label.pack(side="right")
         self._update_dropout_label()
