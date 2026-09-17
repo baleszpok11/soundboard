@@ -21,6 +21,7 @@ from .downloader import (
     downloader_age_days,
     format_seconds,
     parse_time,
+    source_for,
     update_hint,
 )
 from .theme import (
@@ -239,7 +240,8 @@ class DownloadMixin:
                 message = str(e)
                 self.root.after(0, lambda: self._on_download_error(message))
             return
-        self.root.after(0, lambda: self._on_download_done(final_path, title))
+        source = source_for(url, start, end)
+        self.root.after(0, lambda: self._on_download_done(final_path, title, source))
 
     def _on_download_progress(self, cancel, fraction, text):
         if cancel is not self._download_cancel or cancel.is_set():
@@ -285,7 +287,7 @@ class DownloadMixin:
         if getattr(sys, "frozen", False):
             self.download_update_button.pack(anchor="w", padx=8, pady=(0, 8), after=self.download_status)
 
-    def _on_download_done(self, path, title):
+    def _on_download_done(self, path, title, source=None):
         self._finish_download()
         for entry in (self.download_url_entry, self.download_start_entry, self.download_end_entry):
             entry.delete(0, "end")
@@ -296,4 +298,6 @@ class DownloadMixin:
             )
             return
         self.download_status.configure(text=f"Saved: {os.path.basename(path)}", text_color=COLOR_ORANGE)
-        self._add_sound_entry(title, os.path.basename(path))
+        # Keep where it came from and how it was trimmed, so the same clip
+        # can be rebuilt from a shared board file.
+        self._add_sound_entry(title, os.path.basename(path), source)

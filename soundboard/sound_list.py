@@ -580,11 +580,15 @@ class SoundListMixin:
                 return sound
         return None
 
-    def _add_sound_entry(self, name, stored_path):
-        self.sounds.append(
-            {"name": name, "path": stored_path, "hotkey": None, "enabled": True,
-             "volume": 100, "loop": False}
-        )
+    def _add_sound_entry(self, name, stored_path, source=None):
+        """`source` is where a downloaded clip came from, so the board can
+        be shared as links rather than audio. Files picked from disk and
+        clips saved by the editor have none, and aren't shareable."""
+        entry = {"name": name, "path": stored_path, "hotkey": None, "enabled": True,
+                 "volume": 100, "loop": False}
+        if source is not None:
+            entry["source"] = source
+        self.sounds.append(entry)
         save_config(self.config)
         self._refresh_sound_list()
 
