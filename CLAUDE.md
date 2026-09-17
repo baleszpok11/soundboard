@@ -33,7 +33,11 @@ virtual audio cable.
 - PyInstaller (standalone executables; onefile on Windows/Linux, onedir
   .app on macOS), built via GitHub Actions CI; needs
   --collect-data customtkinter --collect-all yt_dlp --collect-all
-  imageio_ffmpeg, plus NSMicrophoneUsageDescription on macOS
+  imageio_ffmpeg, plus NSMicrophoneUsageDescription on macOS. pynput picks
+  its backend with a runtime import, so each build names its own
+  (--hidden-import pynput.keyboard._xorg/_win32/_darwin and the matching
+  pynput.mouse one); --collect-all pynput is not enough, it copies the
+  backend as a data file that never gets analysed, so Xlib is left out
 - macOS dev: use Homebrew python@3.12 + python-tk@3.12 (Apple's CLT
   Python ships Tk 8.5, which renders blank windows)
 
