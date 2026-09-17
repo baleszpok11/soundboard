@@ -6,9 +6,9 @@ from tkinter import messagebox
 
 import customtkinter as ctk
 
-from config import save_config
-from dialogs import HotkeyDialog
-from hotkeys import (
+from .config import save_config
+from .dialogs import HotkeyDialog
+from .hotkeys import (
     MACOS_INPUT_MONITORING_URL,
     HotkeyListener,
     hotkey_keys,
@@ -17,7 +17,7 @@ from hotkeys import (
     pin_macos_keyboard_layout,
     request_hotkey_permission,
 )
-from theme import (
+from .theme import (
     COLOR_BG,
     COLOR_ERROR,
     COLOR_ORANGE,

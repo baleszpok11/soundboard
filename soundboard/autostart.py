@@ -20,7 +20,8 @@ def _command():
     """The command that starts this copy of Soundboard, minimized."""
     if getattr(sys, "frozen", False):
         return [sys.executable, "--hidden"]
-    script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "soundboard.py")
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    script = os.path.join(root, "main.py")
     return [sys.executable, script, "--hidden"]
 
 

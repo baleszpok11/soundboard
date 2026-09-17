@@ -8,9 +8,9 @@ from tkinter import messagebox
 
 import customtkinter as ctk
 
-from audio_engine import SAMPLE_RATE, sd, test_tone
-from config import save_config
-from theme import (
+from .audio_engine import SAMPLE_RATE, sd, test_tone
+from .config import save_config
+from .theme import (
     COLOR_BG,
     COLOR_ERROR,
     COLOR_ORANGE,

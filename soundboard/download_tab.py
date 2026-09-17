@@ -13,8 +13,8 @@ import imageio_ffmpeg
 import yt_dlp
 import yt_dlp.version
 
-from config import SOUNDS_DIR, ensure_sounds_dir
-from downloader import (
+from .config import SOUNDS_DIR, ensure_sounds_dir
+from .downloader import (
     DOWNLOADER_STALE_DAYS,
     RELEASES_URL,
     TrimAudioPP,
@@ -23,7 +23,7 @@ from downloader import (
     parse_time,
     update_hint,
 )
-from theme import (
+from .theme import (
     COLOR_BG,
     COLOR_ERROR,
     COLOR_ORANGE,

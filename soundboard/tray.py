@@ -7,9 +7,9 @@ from tkinter import messagebox
 
 import customtkinter as ctk
 
-import autostart
-from config import ICON_PATH, save_config
-from theme import COLOR_BG, COLOR_ORANGE, COLOR_ORANGE_HOVER, COLOR_SURFACE, COLOR_TEXT
+from . import autostart
+from .config import ICON_PATH, save_config
+from .theme import COLOR_BG, COLOR_ORANGE, COLOR_ORANGE_HOVER, COLOR_SURFACE, COLOR_TEXT
 
 
 class TrayMixin:

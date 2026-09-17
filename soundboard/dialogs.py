@@ -8,10 +8,10 @@ import webbrowser
 
 import customtkinter as ctk
 
-import bug_report
-from config import write_error_log
-from hotkeys import MODIFIER_ORDER, hotkey_part_for_key, modifier_for_keysym
-from theme import (
+from . import bug_report
+from .config import write_error_log
+from .hotkeys import MODIFIER_ORDER, hotkey_part_for_key, modifier_for_keysym
+from .theme import (
     COLOR_BG,
     COLOR_ERROR,
     COLOR_ORANGE,

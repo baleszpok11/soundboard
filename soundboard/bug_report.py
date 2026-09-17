@@ -16,7 +16,7 @@ import sys
 import urllib.parse
 import urllib.request
 
-from config import APP_DIR, APP_VERSION
+from .config import APP_DIR, APP_VERSION
 
 REPORT_URL = ""  # the relay's /report endpoint; blank disables sending
 ISSUE_URL = "https://github.com/baleszpok11/soundboard/issues/new"
