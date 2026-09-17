@@ -26,6 +26,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 import urllib.error
 import urllib.request
 import zipfile
@@ -39,6 +40,7 @@ USER_AGENT = f"soundboard/{APP_VERSION}"
 CHECK_TIMEOUT_S = 10
 DOWNLOAD_TIMEOUT_S = 60
 DOWNLOAD_CHUNK = 64 * 1024
+PROGRESS_INTERVAL_S = 0.1  # a chunk-by-chunk report floods the Tk event queue
 MAX_DOWNLOAD_BYTES = 400 * 1024 * 1024  # a release zip is ~100 MB; well past that is not ours
 OLD_SUFFIX = ".old"  # the previous exe, left behind on Windows until the next start
 
@@ -148,6 +150,7 @@ def download(release, directory, on_progress=None, cancel=None):
     destination = os.path.join(directory, release.asset_name)
     total = release.asset_size or 0
     done = 0
+    reported_at = 0.0
     try:
         with urllib.request.urlopen(
             _request(release.asset_url, accept="application/octet-stream"),
@@ -165,7 +168,11 @@ def download(release, directory, on_progress=None, cancel=None):
                     if done > MAX_DOWNLOAD_BYTES:
                         raise UpdateError("The download is far larger than a release should be.")
                     out.write(chunk)
-                    if on_progress is not None:
+                    now = time.monotonic()
+                    if on_progress is not None and (
+                        done == total or now - reported_at >= PROGRESS_INTERVAL_S
+                    ):
+                        reported_at = now
                         on_progress(done, total)
     except UpdateError:
         _remove(destination)
@@ -230,7 +237,12 @@ def apply(zip_path, relaunch=True, _program=None, _system=None):
     """
     system = _system or platform.system()
     program = _program or current_program()
-    staging = tempfile.mkdtemp(prefix="soundboard-update-", dir=os.path.dirname(program))
+    try:
+        # Next to the program, so the move into place stays on one
+        # filesystem. An install directory we cannot write to fails here.
+        staging = tempfile.mkdtemp(prefix="soundboard-update-", dir=os.path.dirname(program))
+    except OSError as e:
+        raise UpdateError(f"Could not write to the folder Soundboard is installed in: {e}")
     try:
         new_program = extract(zip_path, staging)
         if not os.path.exists(new_program):
@@ -263,15 +275,16 @@ def apply(zip_path, relaunch=True, _program=None, _system=None):
         raise UpdateError(f"Could not install the update: {e}")
     shutil.rmtree(staging, ignore_errors=True)
     if relaunch:
-        relaunch_program(program)
+        relaunch_program(program, system)
     return program
 
 
-def relaunch_program(program):
+def relaunch_program(program, system=None):
     """Start the new build and leave. Detached, so it survives this
     process exiting."""
+    system = system or platform.system()
     kwargs = {"close_fds": True}
-    if platform.system() == "Windows":
+    if system == "Windows":
         kwargs["creationflags"] = 0x00000008 | 0x00000200  # DETACHED_PROCESS | NEW_PROCESS_GROUP
     else:
         kwargs["start_new_session"] = True

@@ -17,7 +17,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Tag must match APP_VERSION
         run: |
-          version=$(python -c "import re; print(re.search(r'APP_VERSION = \"([^\"]+)\"', open('soundboard/config.py').read()).group(1))")
+          version=$(python3 -c "import re; print(re.search(r'APP_VERSION = \"([^\"]+)\"', open('soundboard/config.py').read()).group(1))")
           if [ "${{ github.ref_name }}" != "v$version" ]; then
             echo "Tag ${{ github.ref_name }} does not match APP_VERSION $version (expected v$version)."
             echo "Bump APP_VERSION in soundboard/config.py, or retag."

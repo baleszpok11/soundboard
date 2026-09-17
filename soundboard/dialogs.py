@@ -2,6 +2,7 @@
 error dialog and the bug report window."""
 
 import os
+import shutil
 import tempfile
 import threading
 import tkinter as tk
@@ -423,7 +424,7 @@ class UpdateDialog(ctk.CTkToplevel):
         self._on_skip = on_skip
         self._cancelled = False
         self._busy = False
-        self._temp_dir = None
+        self._installing = False
 
         ctk.CTkLabel(
             self, text=f"Soundboard {release.version} is available.",
@@ -498,6 +499,16 @@ class UpdateDialog(ctk.CTkToplevel):
 
     # -- running ---------------------------------------------------------
 
+    def _download_dir(self):
+        """Where the download goes, and whether that is ours to delete.
+        A by-hand install needs the file to still be there later, so it
+        lands in Downloads rather than a temp directory the OS may purge."""
+        if not updater.can_self_update():
+            downloads = os.path.join(os.path.expanduser("~"), "Downloads")
+            if os.path.isdir(downloads):
+                return downloads, False
+        return tempfile.mkdtemp(prefix="soundboard-update-"), True
+
     def _start(self):
         if self._busy:
             return
@@ -508,47 +519,79 @@ class UpdateDialog(ctk.CTkToplevel):
         self.progress.set(0)
         self.progress.pack(fill="x", padx=16, pady=(0, 8), before=self.status)
         self.status.configure(text="Downloading...")
-        self._temp_dir = tempfile.mkdtemp(prefix="soundboard-update-")
-        threading.Thread(target=self._work, daemon=True).start()
+        directory, temporary = self._download_dir()
+        threading.Thread(target=self._work, args=(directory, temporary), daemon=True).start()
 
     def _cancel(self):
         self._cancelled = True
         self.status.configure(text="Cancelling...")
 
-    def _work(self):
+    def _work(self, directory, temporary):
         """Download, then install. Runs off the main thread; every UI
         touch goes back through after()."""
+        keep = False
         try:
-            path = updater.download(
-                self.release, self._temp_dir,
-                on_progress=self._report_progress,
-                cancel=lambda: self._cancelled,
-            )
-        except updater.UpdateError as e:
-            self._finish(str(e))
-            return
-        if not updater.can_self_update():
-            self._finish(
-                f"Downloaded to {path}. Install it over your current copy, then reopen Soundboard.",
-                reveal=path,
-            )
-            return
-        self._post(lambda: self.status.configure(text="Installing..."))
-        try:
-            updater.apply(path)
-        except updater.UpdateError as e:
-            self._finish(str(e))
-            return
-        # apply() has already started the new build.
+            try:
+                path = updater.download(
+                    self.release, directory,
+                    on_progress=self._report_progress,
+                    cancel=lambda: self._cancelled,
+                )
+            except updater.UpdateError as e:
+                self._finish(str(e))
+                return
+            if not updater.can_self_update():
+                keep = True  # the user installs this copy by hand
+                self._finish(
+                    f"Downloaded to {path}. Install it over your current copy, then reopen Soundboard.",
+                    reveal=path,
+                )
+                return
+            # Set here rather than in the posted callback: the close paths
+            # have to be shut before apply() starts, not one event later.
+            self._installing = True
+            self._post(self._show_installing)
+            try:
+                updater.apply(path)
+            except updater.UpdateError as e:
+                self._finish(str(e))
+                return
+        finally:
+            if temporary and not keep:
+                shutil.rmtree(directory, ignore_errors=True)
+        # apply() has already started the new build, so this process has to
+        # go whether or not the dialog is still on screen.
         self._post(self._quit_for_relaunch)
+        if not self._exists():
+            os._exit(0)
+
+    def _show_installing(self):
+        """Past this point there is nothing to cancel: the binary is being
+        replaced, and stopping half way would leave no working copy."""
+        self.status.configure(text="Installing...")
+        self.action_button.configure(state="disabled")
+        self.close_button.configure(state="disabled")
 
     def _report_progress(self, done, total):
         if total:
-            self._post(lambda: self.progress.set(done / total))
+            fraction = done / total
             megabytes = f"{done / 1048576:.0f} of {total / 1048576:.0f} MB"
         else:
+            fraction = None
             megabytes = f"{done / 1048576:.0f} MB"
-        self._post(lambda: self.status.configure(text=f"Downloading... {megabytes}"))
+
+        def show():
+            if fraction is not None:
+                self.progress.set(fraction)
+            self.status.configure(text=f"Downloading... {megabytes}")
+
+        self._post(show)
+
+    def _exists(self):
+        try:
+            return bool(self.winfo_exists())
+        except tk.TclError:
+            return False
 
     def _post(self, call):
         """Hop back to the Tk thread, ignoring a window already closed."""
@@ -560,10 +603,14 @@ class UpdateDialog(ctk.CTkToplevel):
     def _finish(self, message, reveal=None):
         def done():
             self._busy = False
+            self._installing = False
             self.progress.pack_forget()
             self.status.configure(text=message)
-            self.action_button.configure(text=self._action_text(), command=self._start)
+            self.action_button.configure(
+                text=self._action_text(), command=self._start, state="normal",
+            )
             self.skip_button.configure(state="normal")
+            self.close_button.configure(state="normal")
             if reveal:
                 updater.reveal(reveal)
         self._post(done)
@@ -582,6 +629,8 @@ class UpdateDialog(ctk.CTkToplevel):
     # -- closing ---------------------------------------------------------
 
     def _skip(self):
+        if self._installing:
+            return
         if self.config_data is not None:
             self.config_data["skipped_version"] = self.release.version
             if self._on_skip is not None:
@@ -589,6 +638,10 @@ class UpdateDialog(ctk.CTkToplevel):
         self._close()
 
     def _close(self):
+        if self._installing:
+            # Closing now would orphan the relaunch and leave the old copy
+            # running next to the new one.
+            return
         if self._busy:
             self._cancelled = True
         self.destroy()
