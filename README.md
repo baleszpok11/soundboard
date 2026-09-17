@@ -40,7 +40,8 @@ together, from one virtual microphone.
   sites (via yt-dlp) as MP3, straight into your board, with progress,
   cancel, and optional start/end times
 - **Sound Editor** tab: trim a clip's start/end, boost or cut bass,
-  set volume or normalize, fade in/out and shift the pitch, with a
+  set volume or normalize, fade in/out, shift the pitch and choose
+  whether loud edits stay clean or clip, with a
   waveform view, preview and undo
 - Optionally start with the computer and keep running in the tray /
   menu bar when the window is closed, so hotkeys still work
@@ -223,13 +224,26 @@ too; if so, leave it off.
   latest release (or run `pip install -U yt-dlp` when running from source).
 - **Sound Editor tab:** pick a sound (or browse for any file), drag the
   Start/End sliders to trim it (at least 0.05 s is kept), adjust Bass
-  (-12 to +12 dB), click Preview to listen (Stop ends the preview), then
+  (-36 to +36 dB), click Preview to listen (Stop ends the preview), then
   "Save as new sound" to write a new WAV into `Sounds/` and add it to the
-  board. **Pitch** shifts the clip in semitones, up or down an octave;
-  like speeding up or slowing down a tape, it changes the speed and the
-  length along with the pitch (+12 st is twice as fast and half as long). If a bass boost would push the clip past full volume, it's
-  turned down just enough to avoid distortion. The original file is not
-  changed.
+  board. **Pitch** shifts the clip in semitones, up to two octaves either
+  way; like speeding up or slowing down a tape, it changes the speed and
+  the length along with the pitch (+12 st is twice as fast and half as
+  long). The fades can be as long as half the selection, so a long clip
+  can fade for as long as you like.
+
+  **Too loud** decides what happens when the settings push the clip past
+  full volume, which a big bass or volume boost easily does:
+
+  | | |
+  | --- | --- |
+  | **Keep clean** | turns the whole clip down just enough to fit, so nothing distorts (the default) |
+  | **Let it clip** | shears the peaks off at full scale: loud and nasty |
+  | **Soft clip** | bends the peaks over instead, the way a distortion pedal does: loud and dirty, but still musical |
+
+  Clean is the safe one, but it also gives away the loudness: the same
+  bass boost comes out roughly three times quieter than letting it clip.
+  The original file is never changed, whichever you pick.
 
 ### Sharing a board
 
