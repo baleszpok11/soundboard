@@ -13,6 +13,7 @@ import customtkinter as ctk
 
 from .config import (
     SOUNDS_DIR,
+    unique_profile_name,
     ensure_sounds_dir,
     resolve_sound_path,
     same_file,
@@ -40,9 +41,126 @@ class SoundListMixin:
     """The Soundboard tab's sound list and sound management. Expects
     `config`, `audio_engine` and `root` from Soundboard."""
 
+    # -- profiles -------------------------------------------------------
+
+    def _build_profile_bar(self, parent):
+        bar = ctk.CTkFrame(parent, fg_color=COLOR_BG)
+        bar.pack(fill="x", padx=4, pady=(6, 0))
+        ctk.CTkLabel(bar, text="Profile:", text_color=COLOR_TEXT).pack(side="left", padx=(4, 6))
+        self.profile_var = tk.StringVar(value=self.config["active_profile"])
+        self.profile_menu = ctk.CTkOptionMenu(
+            bar, variable=self.profile_var, values=self._profile_names(),
+            command=self._on_profile_change,
+            fg_color=COLOR_ROW, button_color=COLOR_ORANGE,
+            button_hover_color=COLOR_ORANGE_HOVER, text_color=COLOR_TEXT,
+            dropdown_fg_color=COLOR_ROW,
+        )
+        self.profile_menu.pack(side="left")
+        manage = ctk.CTkButton(
+            bar, text="Manage", width=80,
+            fg_color=COLOR_ROW, hover_color=COLOR_SURFACE, text_color=COLOR_ORANGE,
+            border_width=1, border_color=COLOR_ORANGE,
+        )
+        manage.configure(command=lambda b=manage: self._show_profile_menu(b))
+        manage.pack(side="left", padx=(8, 0))
+
+    def _profile_names(self):
+        return [p["name"] for p in self.config["profiles"]]
+
+    def _refresh_profile_menu(self):
+        self.profile_menu.configure(values=self._profile_names())
+        self.profile_var.set(self.config["active_profile"])
+
+    def _switch_profile(self, name):
+        """Move the board to another profile: stop what the old one was
+        playing, then rebuild the list, hotkeys and cache around the new
+        sounds."""
+        # A clip from the old board would otherwise keep playing with
+        # nothing on screen to stop it, since its row is gone.
+        self.audio_engine.stop_all()
+        self.config["active_profile"] = name
+        save_config(self.config)
+        self.search_entry.delete(0, "end")
+        self._search_text = ""
+        self._refresh_profile_menu()
+        self._refresh_sound_list()
+        self._apply_hotkeys()
+        self.audio_engine.preload(
+            resolve_sound_path(s["path"]) for s in self.sounds if s.get("enabled", True)
+        )
+
+    def _on_profile_change(self, name):
+        if name != self.config["active_profile"]:
+            self._switch_profile(name)
+
+    def _show_profile_menu(self, anchor):
+        menu = tk.Menu(
+            self.root, tearoff=0, bg=COLOR_ROW, fg=COLOR_TEXT,
+            activebackground=COLOR_ORANGE, activeforeground=COLOR_BG,
+        )
+        menu.add_command(label="New profile...", command=self.new_profile)
+        menu.add_command(label="Rename...", command=self.rename_profile)
+        menu.add_command(label="Duplicate", command=self.duplicate_profile)
+        menu.add_separator()
+        menu.add_command(
+            label="Delete", command=self.delete_profile,
+            state="normal" if len(self.config["profiles"]) > 1 else "disabled",
+        )
+        try:
+            menu.tk_popup(anchor.winfo_rootx(), anchor.winfo_rooty() + anchor.winfo_height())
+        finally:
+            menu.grab_release()
+
+    def _ask_profile_name(self, title, current=""):
+        name = TextDialog(self.root, title, "Profile name:", current).get()
+        if not name or not name.strip():
+            return None
+        return unique_profile_name(name, set(self._profile_names()) - {current})
+
+    def new_profile(self):
+        name = self._ask_profile_name("New profile")
+        if name is None:
+            return
+        self.config["profiles"].append({"name": name, "sounds": []})
+        self._switch_profile(name)
+
+    def rename_profile(self):
+        current = self.config["active_profile"]
+        name = self._ask_profile_name("Rename profile", current)
+        if name is None or name == current:
+            return
+        self.profile["name"] = name
+        self.config["active_profile"] = name
+        save_config(self.config)
+        self._refresh_profile_menu()
+
+    def duplicate_profile(self):
+        name = self._ask_profile_name("Duplicate profile", self.config["active_profile"])
+        if name is None:
+            return
+        # Copy each entry, or the two profiles would share sound dicts and
+        # renaming one would rename the other.
+        copied = [dict(sound) for sound in self.sounds]
+        self.config["profiles"].append({"name": name, "sounds": copied})
+        self._switch_profile(name)
+
+    def delete_profile(self):
+        if len(self.config["profiles"]) <= 1:
+            return  # the board always has one profile
+        profile = self.profile
+        if not messagebox.askyesno(
+            "Delete profile",
+            f"Delete the profile '{profile['name']}' and its {len(profile['sounds'])} sound(s) "
+            "from the board?\n\nThe sound files themselves are not deleted.",
+        ):
+            return
+        self.config["profiles"].remove(profile)
+        self._switch_profile(self._profile_names()[0])
+
     # -- sound list -----------------------------------------------------
 
     def _build_sound_list(self, parent):
+        self._build_profile_bar(parent)
         toolbar = ctk.CTkFrame(parent, fg_color=COLOR_BG)
         toolbar.pack(fill="x", padx=4, pady=(6, 0))
         # No textvariable: CTkEntry hides its placeholder when one is set.
@@ -129,7 +247,7 @@ class SoundListMixin:
         """(index, sound) pairs matching the search box."""
         query = self._search_text
         return [
-            (i, s) for i, s in enumerate(self.config["sounds"])
+            (i, s) for i, s in enumerate(self.sounds)
             if not query or query in s["name"].lower()
         ]
 
@@ -139,7 +257,7 @@ class SoundListMixin:
         self._playing_widgets = {}  # rebuilt below; the poll reads it
         visible = self._visible_sounds()
         if not visible:
-            text = "No sounds match your search." if self.config["sounds"] else "No sounds yet. Click Add sound or use the Download tab."
+            text = "No sounds match your search." if self.sounds else "No sounds yet. Click Add sound or use the Download tab."
             ctk.CTkLabel(self.list_frame, text=text, text_color=COLOR_TEXT_DIM).pack(pady=20)
         elif self.config["sound_view"] == "grid":
             self._build_sound_grid(visible)
@@ -294,8 +412,8 @@ class SoundListMixin:
             self.root, tearoff=0, bg=COLOR_ROW, fg=COLOR_TEXT,
             activebackground=COLOR_ORANGE, activeforeground=COLOR_BG,
         )
-        count = len(self.config["sounds"])
-        sound = self.config["sounds"][index]
+        count = len(self.sounds)
+        sound = self.sounds[index]
         if with_hotkey:
             menu.add_command(label="Set hotkey...", command=lambda: self.set_hotkey(index))
         menu.add_command(
@@ -325,7 +443,7 @@ class SoundListMixin:
             menu.grab_release()
 
     def _set_loop(self, index, loop):
-        sound = self.config["sounds"][index]
+        sound = self.sounds[index]
         sound["loop"] = bool(loop)
         save_config(self.config)
         # Reach the running clip too, so switching looping off stops the
@@ -334,7 +452,7 @@ class SoundListMixin:
         self._refresh_sound_list()
 
     def rename_sound(self, index):
-        sound = self.config["sounds"][index]
+        sound = self.sounds[index]
         name = TextDialog(self.root, "Rename sound", "Name:", sound["name"]).get()
         if not name or name == sound["name"]:
             return
@@ -343,7 +461,7 @@ class SoundListMixin:
         self._refresh_sound_list()
 
     def move_sound(self, index, new_index):
-        sounds = self.config["sounds"]
+        sounds = self.sounds
         if not (0 <= index < len(sounds) and 0 <= new_index < len(sounds)) or index == new_index:
             return
         sounds.insert(new_index, sounds.pop(index))
@@ -381,7 +499,7 @@ class SoundListMixin:
             self.move_sound(source, target.sound_index)
 
     def _on_toggle_sound(self, index, checkbox):
-        sound = self.config["sounds"][index]
+        sound = self.sounds[index]
         sound["enabled"] = bool(checkbox.get())
         if not sound["enabled"]:
             # Unchecking is the obvious "make this stop" gesture, so don't
@@ -457,13 +575,13 @@ class SoundListMixin:
 
     def _find_sound(self, path):
         """The board entry that plays this file, if any."""
-        for sound in self.config["sounds"]:
+        for sound in self.sounds:
             if same_file(resolve_sound_path(sound["path"]), path):
                 return sound
         return None
 
     def _add_sound_entry(self, name, stored_path):
-        self.config["sounds"].append(
+        self.sounds.append(
             {"name": name, "path": stored_path, "hotkey": None, "enabled": True,
              "volume": 100, "loop": False}
         )
@@ -471,11 +589,11 @@ class SoundListMixin:
         self._refresh_sound_list()
 
     def remove_sound(self, index):
-        sound = self.config["sounds"][index]
+        sound = self.sounds[index]
         path = resolve_sound_path(sound["path"])
         shared = any(
             same_file(resolve_sound_path(other["path"]), path)
-            for i, other in enumerate(self.config["sounds"]) if i != index
+            for i, other in enumerate(self.sounds) if i != index
         )
         # Only offer to delete files the app owns that nothing else uses.
         delete_file = False
@@ -490,7 +608,7 @@ class SoundListMixin:
                 return
             delete_file = answer
         self.audio_engine.stop_key(self._sound_key(sound))
-        del self.config["sounds"][index]
+        del self.sounds[index]
         save_config(self.config)
         self._refresh_sound_list()
         self._apply_hotkeys()

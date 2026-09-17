@@ -139,7 +139,7 @@ class MicHotkeyMixin:
         self._update_mic_state()
 
     def set_hotkey(self, index):
-        sound = self.config["sounds"][index]
+        sound = self.sounds[index]
         hotkey = self._ask_hotkey("Set hotkey", sound.get("hotkey"), owner=sound)
         if hotkey is None:
             return
@@ -195,7 +195,7 @@ class MicHotkeyMixin:
             ("mute", "Mute mic", self.config.get("mute_hotkey")),
             ("ptt", "Push to talk", self.config.get("ptt_hotkey")),
         ]
-        candidates += [(s, f"'{s['name']}'", s.get("hotkey")) for s in self.config["sounds"]]
+        candidates += [(s, f"'{s['name']}'", s.get("hotkey")) for s in self.sounds]
         for obj, label, other in candidates:
             if obj is not skip and other and hotkey_keys(other) == keys:
                 return label
@@ -209,7 +209,7 @@ class MicHotkeyMixin:
             self.hotkey_listener = None
 
         mapping = {}
-        for sound in self.config["sounds"]:
+        for sound in self.sounds:
             if not sound.get("enabled", True):
                 continue
             hotkey = sound.get("hotkey")

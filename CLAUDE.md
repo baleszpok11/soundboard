@@ -34,6 +34,11 @@ virtual audio cable.
   URL. Never put a GitHub token in the app - it can be extracted
 - JSON file for config (no database); devices stored by name, sounds by
   filename relative to Sounds/
+- Profiles: config["profiles"] is a list of {name, sounds}, addressed by
+  name through config["active_profile"]; use active_profile()/
+  profile_sounds() or the Soundboard.profile/.sounds properties rather
+  than reaching into the list. Only the active profile's hotkeys are
+  registered. A pre-profile config migrates into one named Default
 - PyInstaller (standalone executables; onefile on Windows/Linux, onedir
   .app on macOS), built via GitHub Actions CI; needs
   --collect-data customtkinter --collect-all yt_dlp --collect-all

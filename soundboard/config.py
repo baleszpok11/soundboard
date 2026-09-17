@@ -31,6 +31,7 @@ def _data_dir():
 
 
 APP_VERSION = "0.7.0"  # bump before tagging a release
+DEFAULT_PROFILE = "Default"
 APP_DIR = _data_dir()
 CONFIG_PATH = os.path.join(APP_DIR, "soundboard_config.json")
 SOUNDS_DIR = os.path.join(APP_DIR, "Sounds")
@@ -74,7 +75,11 @@ def load_config():
     if os.path.exists(CONFIG_PATH):
         with open(CONFIG_PATH, "r", encoding="utf-8") as f:
             config = json.load(f)
-        if not isinstance(config, dict) or not isinstance(config.get("sounds", []), list):
+        if (
+            not isinstance(config, dict)
+            or not isinstance(config.get("sounds", []), list)
+            or not isinstance(config.get("profiles", []), list)
+        ):
             raise ValueError("config has an unexpected structure")
     if "device" in config and "output_device" not in config:
         config["output_device"] = config.pop("device")
@@ -92,15 +97,70 @@ def load_config():
     config.setdefault("ptt_hotkey", None)
     config.setdefault("sound_view", "list")
     config.setdefault("close_to_tray", False)
-    config.setdefault("sounds", [])
-    config["sounds"] = [s for s in config["sounds"] if isinstance(s, dict) and s.get("path")]
-    for sound in config["sounds"]:
-        sound.setdefault("name", os.path.splitext(os.path.basename(sound["path"]))[0])
-        sound.setdefault("hotkey", None)
-        sound.setdefault("enabled", True)
-        sound.setdefault("loop", False)
-        sound.setdefault("volume", 100)
+    _load_profiles(config)
     return config
+
+
+def _load_profiles(config):
+    """Sounds used to be one flat list; they now live in named profiles.
+    An older config keeps everything it had, in a profile called
+    Default."""
+    profiles = config.pop("profiles", None)
+    if not profiles:
+        # Pre-profile config (or a hand-emptied one): everything it has
+        # becomes the first profile.
+        profiles = [{"name": DEFAULT_PROFILE, "sounds": config.get("sounds", [])}]
+    config.pop("sounds", None)  # the flat list is the profile's now
+
+    cleaned, seen = [], set()
+    for profile in profiles:
+        if not isinstance(profile, dict):
+            continue
+        name = profile.get("name") or DEFAULT_PROFILE
+        name = unique_profile_name(name, seen)
+        seen.add(name)
+        sounds = profile.get("sounds")
+        sounds = sounds if isinstance(sounds, list) else []
+        cleaned.append({"name": name, "sounds": [_load_sound(s) for s in sounds
+                                                if isinstance(s, dict) and s.get("path")]})
+    if not cleaned:
+        cleaned = [{"name": DEFAULT_PROFILE, "sounds": []}]
+    config["profiles"] = cleaned
+
+    names = [p["name"] for p in cleaned]
+    if config.get("active_profile") not in names:
+        config["active_profile"] = names[0]
+
+
+def _load_sound(sound):
+    sound.setdefault("name", os.path.splitext(os.path.basename(sound["path"]))[0])
+    sound.setdefault("hotkey", None)
+    sound.setdefault("enabled", True)
+    sound.setdefault("loop", False)
+    sound.setdefault("volume", 100)
+    return sound
+
+
+def unique_profile_name(name, taken):
+    """Profiles are addressed by name, so two can't share one."""
+    name = str(name).strip() or DEFAULT_PROFILE
+    if name not in taken:
+        return name
+    n = 2
+    while f"{name} {n}" in taken:
+        n += 1
+    return f"{name} {n}"
+
+
+def active_profile(config):
+    for profile in config["profiles"]:
+        if profile["name"] == config["active_profile"]:
+            return profile
+    return config["profiles"][0]
+
+
+def profile_sounds(config):
+    return active_profile(config)["sounds"]
 
 
 def save_config(config):

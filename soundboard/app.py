@@ -9,6 +9,8 @@ import customtkinter as ctk
 from .audio_engine import AudioEngine
 from .config import (
     CONFIG_PATH,
+    active_profile,
+    profile_sounds,
     ensure_sounds_dir,
     load_config,
     resolve_sound_path,
@@ -125,10 +127,21 @@ class Soundboard(DeviceMixin, MicHotkeyMixin, SoundListMixin, DownloadMixin, Edi
         self._poll_meters()
         self._apply_hotkeys()
         self.audio_engine.preload(
-            resolve_sound_path(s["path"]) for s in self.config["sounds"] if s.get("enabled", True)
+            resolve_sound_path(s["path"]) for s in self.sounds if s.get("enabled", True)
         )
         if self.config["close_to_tray"]:
             self._start_tray()
+
+    @property
+    def profile(self):
+        """The profile whose board is on screen."""
+        return active_profile(self.config)
+
+    @property
+    def sounds(self):
+        """The active profile's sounds. Everything else in the config is
+        shared across profiles."""
+        return profile_sounds(self.config)
 
     def _on_ui_error(self, exc_type, exc_value, exc_tb):
         handle_exception(self.root, exc_type, exc_value, exc_tb, self.config, self._host_api_name())

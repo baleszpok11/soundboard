@@ -197,7 +197,7 @@ class EditorMixin:
     def _refresh_editor_sound_list(self):
         self._editor_sound_paths = {}
         names = []
-        for sound in self.config["sounds"]:
+        for sound in self.sounds:
             label = sound["name"]
             while label in self._editor_sound_paths:
                 label = f"{label} ({sound['path']})"
