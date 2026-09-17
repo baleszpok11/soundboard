@@ -39,10 +39,10 @@ together, from one virtual microphone.
 - **Download** tab: grab audio from YouTube, TikTok, Instagram and other
   sites (via yt-dlp) as MP3, straight into your board, with progress,
   cancel, and optional start/end times
-- **Sound Editor** tab: trim a clip's start/end, boost or cut bass,
-  set volume or normalize, fade in/out, shift the pitch and choose
-  whether loud edits stay clean or clip, with a
-  waveform view, preview and undo
+- **Sound Editor** tab: trim a clip's start/end, boost or cut bass, set
+  volume or normalize, fade in/out, change pitch and speed independently
+  of each other, and choose whether loud edits stay clean or clip, with
+  a waveform view, preview and undo
 - Optionally start with the computer and keep running in the tray /
   menu bar when the window is closed, so hotkeys still work
 - All sounds live in one `Sounds/` folder
@@ -226,11 +226,21 @@ too; if so, leave it off.
   Start/End sliders to trim it (at least 0.05 s is kept), adjust Bass
   (-36 to +36 dB), click Preview to listen (Stop ends the preview), then
   "Save as new sound" to write a new WAV into `Sounds/` and add it to the
-  board. **Pitch** shifts the clip in semitones, up to two octaves either
-  way; like speeding up or slowing down a tape, it changes the speed and
-  the length along with the pitch (+12 st is twice as fast and half as
-  long). The fades can be as long as half the selection, so a long clip
+  board. The fades can be as long as half the selection, so a long clip
   can fade for as long as you like.
+
+  **Pitch** shifts the clip in semitones, up to two octaves either way,
+  and **Speed** makes it faster or slower, from a quarter speed to four
+  times. By default they are independent: a clip can be a fifth higher
+  and still last exactly as long, or play at half speed in the original
+  key. Tick **Tape** to tie them together the way speeding up or slowing
+  down a tape does, which is what the pitch slider used to do on its own
+  (+12 st is then twice as fast and half as long).
+
+  Moving pitch and speed apart is done with a phase vocoder, which is
+  very good on voices and most soundboard material but smears sharp
+  drum hits at extreme settings. Tape mode doesn't use it at all, so
+  it stays the cleanest option when you want both to move together.
 
   **Too loud** decides what happens when the settings push the clip past
   full volume, which a big bass or volume boost easily does:

@@ -8,7 +8,8 @@ import customtkinter as ctk
 import numpy as np
 import soundfile as sf
 
-from .audio_engine import _resample, apply_bass
+from .audio_engine import _resample
+from .dsp import apply_bass, pitch_shift, time_stretch
 from .config import (
     SOUNDS_DIR,
     ensure_sounds_dir,
@@ -36,6 +37,7 @@ EDITOR_PREVIEW_KEY = "editor-preview"
 BASS_RANGE_DB = 36
 GAIN_RANGE_DB = 40
 PITCH_RANGE_ST = 24  # two octaves either way
+SPEED_RANGE_OCTAVES = 2  # the speed slider is in octaves, so 0.25x to 4x
 MIN_FADE_MAX_S = 0.01  # a slider whose ends meet divides by zero
 PLAYHEAD_POLL_MS = 50
 UNDO_SETTLE_MS = 400  # sliders fire continuously; one undo step per burst
@@ -175,8 +177,30 @@ class EditorMixin:
         )
         self.editor_pitch_label.grid(row=6, column=2, padx=8, pady=6)
 
-        ctk.CTkLabel(trim_frame, text="Too loud:", text_color=COLOR_TEXT).grid(
+        ctk.CTkLabel(trim_frame, text="Speed:", text_color=COLOR_TEXT).grid(
             row=7, column=0, sticky="w", padx=8, pady=6
+        )
+        self.editor_speed_slider = ctk.CTkSlider(
+            trim_frame, from_=-SPEED_RANGE_OCTAVES, to=SPEED_RANGE_OCTAVES,
+            command=self._on_speed_change,
+            fg_color=COLOR_ROW, progress_color=COLOR_ORANGE,
+            button_color=COLOR_ORANGE, button_hover_color=COLOR_ORANGE_HOVER,
+        )
+        self.editor_speed_slider.set(0)
+        self.editor_speed_slider.grid(row=7, column=1, sticky="ew", padx=8, pady=6)
+        self.editor_speed_label = ctk.CTkLabel(
+            trim_frame, text=self._speed_text(0), text_color=COLOR_TEXT, width=60,
+        )
+        self.editor_speed_label.grid(row=7, column=2, padx=8, pady=6)
+        self.editor_link_checkbox = ctk.CTkCheckBox(
+            trim_frame, text="Tape", command=self._on_link_change,
+            fg_color=COLOR_ORANGE, hover_color=COLOR_ORANGE_HOVER,
+            checkmark_color=COLOR_BG, text_color=COLOR_TEXT,
+        )
+        self.editor_link_checkbox.grid(row=7, column=3, sticky="w", padx=(0, 8), pady=6)
+
+        ctk.CTkLabel(trim_frame, text="Too loud:", text_color=COLOR_TEXT).grid(
+            row=8, column=0, sticky="w", padx=8, pady=6
         )
         self.editor_clip_mode = ctk.CTkSegmentedButton(
             trim_frame, values=list(CLIP_MODES),
@@ -185,7 +209,7 @@ class EditorMixin:
             unselected_color=COLOR_ROW, unselected_hover_color=COLOR_SURFACE, text_color=COLOR_TEXT,
         )
         self.editor_clip_mode.set(CLIP_CLEAN)
-        self.editor_clip_mode.grid(row=7, column=1, sticky="w", padx=8, pady=6)
+        self.editor_clip_mode.grid(row=8, column=1, columnspan=2, sticky="w", padx=8, pady=6)
 
         buttons = ctk.CTkFrame(parent, fg_color=COLOR_BG)
         buttons.pack(fill="x", padx=4, pady=(4, 8))
@@ -277,6 +301,9 @@ class EditorMixin:
         self._clamp_fades()
         self.editor_pitch_slider.set(0)
         self.editor_pitch_label.configure(text=self._pitch_text(0))
+        self.editor_speed_slider.set(0)
+        self.editor_speed_label.configure(text=self._speed_text(0))
+        self.editor_link_checkbox.deselect()
         self.editor_clip_mode.set(CLIP_CLEAN)
         self._editor_undo = []
         self._editor_committed = self._editor_state()
@@ -288,9 +315,10 @@ class EditorMixin:
         accent = COLOR_ORANGE if enabled else COLOR_TEXT_DIM
         for slider in (self.editor_start_slider, self.editor_end_slider, self.editor_bass_slider,
                        self.editor_fade_in_slider, self.editor_fade_out_slider,
-                       self.editor_pitch_slider):
+                       self.editor_pitch_slider, self.editor_speed_slider):
             slider.configure(state=state, button_color=accent, progress_color=accent)
         self.editor_normalize_checkbox.configure(state=state)
+        self.editor_link_checkbox.configure(state=state)
         self.editor_clip_mode.configure(state=state)
         self._set_gain_enabled(not self.editor_normalize_checkbox.get())
         self.editor_preview_button.configure(state=state, fg_color=COLOR_ORANGE if enabled else COLOR_ROW)
@@ -349,8 +377,37 @@ class EditorMixin:
     def _pitch_text(semitones):
         return f"{semitones:+.0f} st"
 
+    @staticmethod
+    def _speed_text(octaves):
+        return f"{2 ** octaves:.2f}x"
+
     def _on_pitch_change(self, value):
         self.editor_pitch_label.configure(text=self._pitch_text(value))
+        if self.editor_link_checkbox.get():
+            self._set_speed(value / 12)
+        self._record_editor_change()
+
+    def _on_speed_change(self, value):
+        self.editor_speed_label.configure(text=self._speed_text(value))
+        if self.editor_link_checkbox.get():
+            self._set_pitch(value * 12)
+        self._record_editor_change()
+
+    def _set_speed(self, octaves):
+        octaves = max(-SPEED_RANGE_OCTAVES, min(SPEED_RANGE_OCTAVES, octaves))
+        self.editor_speed_slider.set(octaves)
+        self.editor_speed_label.configure(text=self._speed_text(octaves))
+
+    def _set_pitch(self, semitones):
+        semitones = max(-PITCH_RANGE_ST, min(PITCH_RANGE_ST, semitones))
+        self.editor_pitch_slider.set(semitones)
+        self.editor_pitch_label.configure(text=self._pitch_text(semitones))
+
+    def _on_link_change(self):
+        """Tape mode ties the two together, the way a tape machine does.
+        Pitch is the one that was here first, so speed follows it."""
+        if self.editor_link_checkbox.get():
+            self._set_speed(self.editor_pitch_slider.get() / 12)
         self._record_editor_change()
 
     def _on_normalize_change(self):
@@ -385,6 +442,8 @@ class EditorMixin:
             "fade_in": self.editor_fade_in_slider.get(),
             "fade_out": self.editor_fade_out_slider.get(),
             "pitch": self.editor_pitch_slider.get(),
+            "speed": self.editor_speed_slider.get(),
+            "link": bool(self.editor_link_checkbox.get()),
             "clip": self.editor_clip_mode.get(),
         }
 
@@ -400,6 +459,11 @@ class EditorMixin:
         self.editor_fade_in_slider.set(state["fade_in"])
         self.editor_fade_out_slider.set(state["fade_out"])
         self.editor_pitch_slider.set(state["pitch"])
+        self._set_speed(state["speed"])
+        if state["link"]:
+            self.editor_link_checkbox.select()
+        else:
+            self.editor_link_checkbox.deselect()
         self.editor_clip_mode.set(state["clip"])
         self.editor_start_label.configure(text=f"{state['start']:.2f}s")
         self.editor_end_label.configure(text=f"{state['end']:.2f}s")
@@ -408,6 +472,7 @@ class EditorMixin:
         self.editor_fade_in_label.configure(text=f"{state['fade_in']:.2f}s")
         self.editor_fade_out_label.configure(text=f"{state['fade_out']:.2f}s")
         self.editor_pitch_label.configure(text=self._pitch_text(state["pitch"]))
+        self.editor_speed_label.configure(text=self._speed_text(state["speed"]))
         self._set_gain_enabled(not state["normalize"])
         self._update_selection()
 
@@ -510,16 +575,29 @@ class EditorMixin:
         # overshoot themselves, and undoing that would be the point missed.
         if peak > 0 and (normalize or peak > 1.0):
             processed = processed * (SAVE_PEAK / peak)
-        # Pitch goes last, so the fades stay the same share of the clip and
-        # the level set above survives: interpolating between two samples
-        # can never exceed the larger of them, so the peak only falls.
-        semitones = self.editor_pitch_slider.get()
-        if semitones:
-            speed = speed_for_semitones(semitones)
-            processed = _resample(processed, self.editor_samplerate * speed, self.editor_samplerate)
-            if len(processed) == 0:
-                raise ValueError("The selected part is too short to pitch this far.")
+        # Pitch and speed go last, so the fades stay the same share of the
+        # clip and the level set above survives.
+        processed = self._apply_pitch_and_speed(processed)
+        if len(processed) == 0:
+            raise ValueError("The selected part is too short to stretch this far.")
         return processed
+
+    def _apply_pitch_and_speed(self, data):
+        semitones = self.editor_pitch_slider.get()
+        octaves = self.editor_speed_slider.get()
+        if self.editor_link_checkbox.get():
+            # Tape mode: one resample moves pitch and length together, which
+            # is both the effect asked for and the better-sounding way to
+            # get it - no vocoder in the path at all.
+            speed = speed_for_semitones(semitones)
+            if speed == 1.0:
+                return data
+            return _resample(data, self.editor_samplerate * speed, self.editor_samplerate)
+        # Apart: stretch first, then shift what came out. Resampling can only
+        # bring the peak down, and a stretch rebuilds the same partials, so
+        # neither undoes the level set above.
+        data = time_stretch(data, 2 ** octaves)
+        return pitch_shift(data, semitones, self.editor_samplerate)
 
     def _apply_clipping(self, data):
         """What to do with anything past full scale. "Keep clean" leaves it
