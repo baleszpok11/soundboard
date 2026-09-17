@@ -23,6 +23,9 @@ together, from one virtual microphone.
   too — turning it off doesn't affect what others hear through the
   virtual cable
 - Re-triggering a sound that's still playing restarts it
+- Loop a sound so it keeps repeating, for music beds and ambience
+- See what's playing on the board, and stop a single sound without
+  stopping everything
 - "Stop all" button and optional hotkey
 - Volume sliders for the mic, the whole soundboard, and each sound, plus
   a limiter so loud moments get quieter instead of distorting
@@ -143,7 +146,14 @@ too; if so, leave it off.
   and click Save; Esc stops recording so you can type it instead (e.g.
   `<ctrl>+<alt>+1`), and Clear removes it. Letter, number and symbol keys
   need a modifier so they don't fire while you type.
-- "Play" to trigger a sound manually (works even if it's unchecked).
+- "Play" to trigger a sound manually (works even if it's unchecked). A
+  thin bar under the row (or tile) shows how far a playing sound has got,
+  and a "Stop" button appears next to Play while it runs. "Stop" is also
+  in the right-click/More menu, which is how you stop a sound in Grid
+  view.
+- "Loop" in the same menu makes a sound repeat until stopped; looping
+  sounds are marked "(loop)" on the board. Turning Loop off stops the
+  repeat straight away rather than waiting for the current pass to end.
 - Type in **Search sounds...** to filter the list. **List/Grid** switches
   between rows and big buttons (click to play; right-click for options).
 - Drag a row by its `::` handle to reorder it. **More** has Rename, Move

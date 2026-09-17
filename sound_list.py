@@ -160,7 +160,12 @@ class SoundListMixin:
             lines = textwrap.wrap(sound["name"], 20)[:2] or [""]
             if len(textwrap.wrap(sound["name"], 20)) > 2:
                 lines[-1] = lines[-1][:17] + "..."
-            lines.append("(file missing)" if missing else (sound.get("hotkey") or " "))
+            if missing:
+                lines.append("(file missing)")
+            else:
+                hotkey = sound.get("hotkey") or ""
+                loop = "loop" if sound.get("loop") else ""
+                lines.append("  ".join(p for p in (hotkey, loop) if p) or " ")
             # A cell, not a bare button, so the tile can carry a progress
             # bar under it the way list rows do.
             cell = ctk.CTkFrame(self.list_frame, fg_color="transparent")
@@ -223,6 +228,8 @@ class SoundListMixin:
         if len(name) > 40:  # long titles would push the buttons out of the row
             name = name[:37] + "..."
         label_text = f"{name}  [{sound.get('hotkey') or 'no hotkey'}]"
+        if sound.get("loop"):
+            label_text += "  (loop)"
         if missing:
             label_text += "  (file missing)"
         label = ctk.CTkLabel(
@@ -295,6 +302,12 @@ class SoundListMixin:
             label="Stop", command=lambda: self.stop_sound(sound),
             state="normal" if self._sound_key(sound) in self.audio_engine.active_keys() else "disabled",
         )
+        # Held on self so the variable outlives the menu that reads it.
+        self._loop_var = tk.BooleanVar(value=sound.get("loop", False))
+        menu.add_checkbutton(
+            label="Loop", variable=self._loop_var,
+            command=lambda: self._set_loop(index, self._loop_var.get()),
+        )
         menu.add_command(label="Rename...", command=lambda: self.rename_sound(index))
         menu.add_command(label="Move up", command=lambda: self.move_sound(index, index - 1),
                          state="normal" if index > 0 else "disabled")
@@ -310,6 +323,15 @@ class SoundListMixin:
             menu.tk_popup(x, y)
         finally:
             menu.grab_release()
+
+    def _set_loop(self, index, loop):
+        sound = self.config["sounds"][index]
+        sound["loop"] = bool(loop)
+        save_config(self.config)
+        # Reach the running clip too, so switching looping off stops the
+        # repeat instead of waiting for someone to hit Stop.
+        self.audio_engine.set_loop(self._sound_key(sound), sound["loop"])
+        self._refresh_sound_list()
 
     def rename_sound(self, index):
         sound = self.config["sounds"][index]
@@ -442,7 +464,8 @@ class SoundListMixin:
 
     def _add_sound_entry(self, name, stored_path):
         self.config["sounds"].append(
-            {"name": name, "path": stored_path, "hotkey": None, "enabled": True, "volume": 100}
+            {"name": name, "path": stored_path, "hotkey": None, "enabled": True,
+             "volume": 100, "loop": False}
         )
         save_config(self.config)
         self._refresh_sound_list()
@@ -481,7 +504,9 @@ class SoundListMixin:
 
     def play_sound(self, sound):
         path = resolve_sound_path(sound["path"])
-        self.audio_engine.play(path, gain=sound.get("volume", 100) / 100)
+        self.audio_engine.play(
+            path, gain=sound.get("volume", 100) / 100, loop=sound.get("loop", False),
+        )
 
     def _on_playback_error(self, message):
         # Called from the audio worker thread.

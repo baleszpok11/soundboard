@@ -84,19 +84,35 @@ def apply_bass(data, gain_db, sample_rate, cutoff_hz=BASS_CUTOFF_HZ):
 
 
 class _ActiveSound:
-    def __init__(self, data, key=None, gain=1.0):
+    def __init__(self, data, key=None, gain=1.0, loop=False):
         self.data = data
         self.key = key
         self.gain = gain
+        self.loop = loop
         self.position = 0
 
     def read(self, frames):
-        end = min(self.position + frames, len(self.data))
-        chunk = self.data[self.position:end] * self.gain
-        self.position = end
-        finished = self.position >= len(self.data)
+        channels = self.data.shape[1]
+        if not len(self.data):
+            # An empty clip has nothing to wrap around, so looping it
+            # would spin forever.
+            return np.zeros((frames, channels), dtype=np.float32), True
+        parts = []
+        needed = frames
+        while needed > 0:
+            end = min(self.position + needed, len(self.data))
+            parts.append(self.data[self.position:end])
+            needed -= end - self.position
+            self.position = end
+            if self.position < len(self.data):
+                continue
+            if not self.loop:
+                break
+            self.position = 0  # wrap and keep filling the same block
+        chunk = np.concatenate(parts) * self.gain if parts else np.zeros((0, channels), dtype=np.float32)
+        finished = not self.loop and self.position >= len(self.data)
         if len(chunk) < frames:
-            pad = np.zeros((frames - len(chunk), self.data.shape[1]), dtype=np.float32)
+            pad = np.zeros((frames - len(chunk), channels), dtype=np.float32)
             chunk = np.vstack([chunk, pad]) if len(chunk) else pad
         return chunk, finished
 
@@ -264,6 +280,14 @@ class AudioEngine:
             self._active_sounds = []
             self._active_sounds_monitor = []
 
+    def set_loop(self, key, loop):
+        """Change looping on clips already playing, so switching it off
+        doesn't leave one running until it's stopped by hand."""
+        with self._lock:
+            for sound in (*self._active_sounds, *self._active_sounds_monitor):
+                if sound.key == key:
+                    sound.loop = loop
+
     def stop_key(self, key):
         with self._lock:
             self._active_sounds = [s for s in self._active_sounds if s.key != key]
@@ -385,14 +409,14 @@ class AudioEngine:
             return np.zeros((0, self.input_channels), dtype=np.float32)
         return np.concatenate(parts)
 
-    def play_data(self, data, samplerate, key=None, gain=1.0):
+    def play_data(self, data, samplerate, key=None, gain=1.0, loop=False):
         """Queue audio for playback. A clip with the same key that is
         still playing is stopped first, so re-triggering restarts it."""
         if self.output_stream is None and self.monitor_stream is None:
             raise RuntimeError("No output device selected.")
-        self._queue_clip(_resample(data, samplerate, SAMPLE_RATE), key, gain)
+        self._queue_clip(_resample(data, samplerate, SAMPLE_RATE), key, gain, loop)
 
-    def _queue_clip(self, resampled, key, gain):
+    def _queue_clip(self, resampled, key, gain, loop=False):
         main_data = _match_channels(resampled, self.output_channels)
         monitor_data = _match_channels(resampled, self.monitor_channels)
         with self._lock:
@@ -400,29 +424,29 @@ class AudioEngine:
                 self._active_sounds = [s for s in self._active_sounds if s.key != key]
                 self._active_sounds_monitor = [s for s in self._active_sounds_monitor if s.key != key]
             if self.output_stream is not None:
-                self._active_sounds.append(_ActiveSound(main_data, key, gain))
+                self._active_sounds.append(_ActiveSound(main_data, key, gain, loop))
             if self.monitor_stream is not None and not self.monitor_muted:
-                self._active_sounds_monitor.append(_ActiveSound(monitor_data, key, gain))
+                self._active_sounds_monitor.append(_ActiveSound(monitor_data, key, gain, loop))
 
-    def play(self, path, gain=1.0):
+    def play(self, path, gain=1.0, loop=False):
         """Queue a file for playback without blocking the caller. Errors
         are reported through on_error."""
-        self._requests.put((path, gain, True))
+        self._requests.put((path, gain, True, loop))
 
     def preload(self, paths):
         """Decode files into the cache in the background."""
         for path in paths:
-            self._requests.put((path, 1.0, False))
+            self._requests.put((path, 1.0, False, False))
 
     def _worker(self):
         while True:
-            path, gain, play = self._requests.get()
+            path, gain, play, loop = self._requests.get()
             try:
                 if play and self.output_stream is None and self.monitor_stream is None:
                     raise RuntimeError("No output device selected.")
                 data = self._load_clip(path)
                 if play:
-                    self._queue_clip(data, os.path.abspath(path), gain)
+                    self._queue_clip(data, os.path.abspath(path), gain, loop)
             except FileNotFoundError:
                 if play and self.on_error is not None:
                     self.on_error(f"File not found: {path}")
