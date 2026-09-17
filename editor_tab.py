@@ -8,7 +8,7 @@ import customtkinter as ctk
 import numpy as np
 import soundfile as sf
 
-from audio_engine import apply_bass
+from audio_engine import _resample, apply_bass
 from config import (
     SOUNDS_DIR,
     ensure_sounds_dir,
@@ -35,6 +35,14 @@ GAIN_RANGE_DB = 24
 FADE_MAX_S = 5.0
 PLAYHEAD_POLL_MS = 50
 UNDO_SETTLE_MS = 400  # sliders fire continuously; one undo step per burst
+PITCH_RANGE_ST = 12  # semitones either way, so the ends are exactly an octave
+
+
+def speed_for_semitones(semitones):
+    """Playback rate that shifts a clip by this many semitones. Resampling
+    moves pitch and speed together, which is the effect a soundboard
+    wants; separating them would need real time-stretching."""
+    return 2 ** (semitones / 12)
 
 
 class EditorMixin:
@@ -142,6 +150,22 @@ class EditorMixin:
         (self.editor_fade_in_slider, self.editor_fade_in_label), \
             (self.editor_fade_out_slider, self.editor_fade_out_label) = fades
 
+        ctk.CTkLabel(trim_frame, text="Pitch:", text_color=COLOR_TEXT).grid(
+            row=6, column=0, sticky="w", padx=8, pady=6
+        )
+        self.editor_pitch_slider = ctk.CTkSlider(
+            trim_frame, from_=-PITCH_RANGE_ST, to=PITCH_RANGE_ST,
+            number_of_steps=PITCH_RANGE_ST * 4, command=self._on_pitch_change,
+            fg_color=COLOR_ROW, progress_color=COLOR_ORANGE,
+            button_color=COLOR_ORANGE, button_hover_color=COLOR_ORANGE_HOVER,
+        )
+        self.editor_pitch_slider.set(0)
+        self.editor_pitch_slider.grid(row=6, column=1, sticky="ew", padx=8, pady=6)
+        self.editor_pitch_label = ctk.CTkLabel(
+            trim_frame, text=self._pitch_text(0), text_color=COLOR_TEXT, width=60,
+        )
+        self.editor_pitch_label.grid(row=6, column=2, padx=8, pady=6)
+
         buttons = ctk.CTkFrame(parent, fg_color=COLOR_BG)
         buttons.pack(fill="x", padx=4, pady=(4, 8))
         self.editor_preview_button = ctk.CTkButton(
@@ -231,6 +255,8 @@ class EditorMixin:
                               (self.editor_fade_out_slider, self.editor_fade_out_label)):
             slider.set(0)
             label.configure(text="0.00s")
+        self.editor_pitch_slider.set(0)
+        self.editor_pitch_label.configure(text=self._pitch_text(0))
         self._editor_undo = []
         self._editor_committed = self._editor_state()
         self._update_undo_button()
@@ -240,7 +266,8 @@ class EditorMixin:
         state = "normal" if enabled else "disabled"
         accent = COLOR_ORANGE if enabled else COLOR_TEXT_DIM
         for slider in (self.editor_start_slider, self.editor_end_slider, self.editor_bass_slider,
-                       self.editor_fade_in_slider, self.editor_fade_out_slider):
+                       self.editor_fade_in_slider, self.editor_fade_out_slider,
+                       self.editor_pitch_slider):
             slider.configure(state=state, button_color=accent, progress_color=accent)
         self.editor_normalize_checkbox.configure(state=state)
         self._set_gain_enabled(not self.editor_normalize_checkbox.get())
@@ -296,6 +323,14 @@ class EditorMixin:
         self.editor_gain_label.configure(text=f"{value:+.0f} dB")
         self._record_editor_change()
 
+    @staticmethod
+    def _pitch_text(semitones):
+        return f"{semitones:+.0f} st"
+
+    def _on_pitch_change(self, value):
+        self.editor_pitch_label.configure(text=self._pitch_text(value))
+        self._record_editor_change()
+
     def _on_normalize_change(self):
         self._set_gain_enabled(not self.editor_normalize_checkbox.get())
         self._record_editor_change()
@@ -324,6 +359,7 @@ class EditorMixin:
             "normalize": bool(self.editor_normalize_checkbox.get()),
             "fade_in": self.editor_fade_in_slider.get(),
             "fade_out": self.editor_fade_out_slider.get(),
+            "pitch": self.editor_pitch_slider.get(),
         }
 
     def _apply_editor_state(self, state):
@@ -337,12 +373,14 @@ class EditorMixin:
             self.editor_normalize_checkbox.deselect()
         self.editor_fade_in_slider.set(state["fade_in"])
         self.editor_fade_out_slider.set(state["fade_out"])
+        self.editor_pitch_slider.set(state["pitch"])
         self.editor_start_label.configure(text=f"{state['start']:.2f}s")
         self.editor_end_label.configure(text=f"{state['end']:.2f}s")
         self.editor_bass_label.configure(text=f"{state['bass']:+.0f} dB")
         self.editor_gain_label.configure(text=f"{state['gain']:+.0f} dB")
         self.editor_fade_in_label.configure(text=f"{state['fade_in']:.2f}s")
         self.editor_fade_out_label.configure(text=f"{state['fade_out']:.2f}s")
+        self.editor_pitch_label.configure(text=self._pitch_text(state["pitch"]))
         self._set_gain_enabled(not state["normalize"])
         self._update_selection()
 
@@ -443,6 +481,15 @@ class EditorMixin:
         # since WAV files hard-clip anything past full scale.
         if peak > 0 and (normalize or peak > 1.0):
             processed = processed * (SAVE_PEAK / peak)
+        # Pitch goes last, so the fades stay the same share of the clip and
+        # the level set above survives: interpolating between two samples
+        # can never exceed the larger of them, so the peak only falls.
+        semitones = self.editor_pitch_slider.get()
+        if semitones:
+            speed = speed_for_semitones(semitones)
+            processed = _resample(processed, self.editor_samplerate * speed, self.editor_samplerate)
+            if len(processed) == 0:
+                raise ValueError("The selected part is too short to pitch this far.")
         return processed
 
     def _apply_fades(self, data):

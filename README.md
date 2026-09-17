@@ -35,8 +35,9 @@ together, from one virtual microphone.
 - **Download** tab: grab audio from YouTube, TikTok, Instagram and other
   sites (via yt-dlp) as MP3, straight into your board, with progress,
   cancel, and optional start/end times
-- **Sound Editor** tab: trim a clip's start/end and boost or cut bass,
-  with a waveform view and preview
+- **Sound Editor** tab: trim a clip's start/end, boost or cut bass,
+  set volume or normalize, fade in/out and shift the pitch, with a
+  waveform view, preview and undo
 - Optionally start with the computer and keep running in the tray /
   menu bar when the window is closed, so hotkeys still work
 - All sounds live in one `Sounds/` folder
@@ -212,7 +213,9 @@ too; if so, leave it off.
   Start/End sliders to trim it (at least 0.05 s is kept), adjust Bass
   (-12 to +12 dB), click Preview to listen (Stop ends the preview), then
   "Save as new sound" to write a new WAV into `Sounds/` and add it to the
-  board. If a bass boost would push the clip past full volume, it's
+  board. **Pitch** shifts the clip in semitones, up or down an octave;
+  like speeding up or slowing down a tape, it changes the speed and the
+  length along with the pitch (+12 st is twice as fast and half as long). If a bass boost would push the clip past full volume, it's
   turned down just enough to avoid distortion. The original file is not
   changed.
 
