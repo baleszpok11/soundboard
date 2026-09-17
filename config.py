@@ -94,6 +94,7 @@ def load_config():
         sound.setdefault("name", os.path.splitext(os.path.basename(sound["path"]))[0])
         sound.setdefault("hotkey", None)
         sound.setdefault("enabled", True)
+        sound.setdefault("loop", False)
         sound.setdefault("volume", 100)
     return config
 
