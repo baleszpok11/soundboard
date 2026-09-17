@@ -1,0 +1,432 @@
+"""Audio mixing: microphone plus triggered clips into the output device."""
+
+import collections
+import os
+import queue
+import threading
+import time
+
+import numpy as np
+try:
+    import sounddevice as sd
+except OSError as e:
+    # sounddevice bundles PortAudio only on Windows and macOS.
+    sd = None
+    PORTAUDIO_ERROR = e
+else:
+    PORTAUDIO_ERROR = None
+import soundfile as sf
+from scipy.signal import lfilter
+
+SAMPLE_RATE = 48000
+CHANNELS = 2
+BLOCK_SIZE = 1024
+MIC_TARGET_FRAMES = SAMPLE_RATE // 10  # 100 ms cushion against uneven mic delivery
+MIC_MAX_FRAMES = SAMPLE_RATE // 2  # drop older mic audio beyond 500 ms
+BASS_CUTOFF_HZ = 200.0
+CLIP_CACHE_BYTES = 512 * 1024 * 1024  # decoded clips kept in memory
+LIMITER_CEILING = 0.89  # about -1 dBFS
+LIMITER_RELEASE_S = 0.3
+STREAM_TIMEOUT_S = 2.0  # a running stream with no callbacks for this long is treated as lost
+
+
+def _resample(data, orig_sr, target_sr):
+    if orig_sr == target_sr or len(data) == 0:
+        return data
+    target_len = int(round(data.shape[0] * target_sr / orig_sr))
+    orig_idx = np.arange(data.shape[0])
+    target_idx = np.linspace(0, data.shape[0] - 1, num=target_len)
+    resampled = np.empty((target_len, data.shape[1]), dtype=np.float32)
+    for ch in range(data.shape[1]):
+        resampled[:, ch] = np.interp(target_idx, orig_idx, data[:, ch])
+    return resampled
+
+
+def _match_channels(data, channels):
+    if data.shape[1] == channels:
+        return data
+    if data.shape[1] == 1:
+        return np.repeat(data, channels, axis=1)
+    if channels == 1:
+        return data.mean(axis=1, keepdims=True).astype(np.float32)
+    return data[:, :channels]
+
+
+def _low_shelf_coeffs(gain_db, cutoff_hz, sample_rate, slope=1.0):
+    """RBJ Audio EQ Cookbook low-shelf biquad coefficients."""
+    A = 10 ** (gain_db / 40)
+    w0 = 2 * np.pi * cutoff_hz / sample_rate
+    cos_w0 = np.cos(w0)
+    sin_w0 = np.sin(w0)
+    alpha = sin_w0 / 2 * np.sqrt((A + 1 / A) * (1 / slope - 1) + 2)
+    sqrt_A = np.sqrt(A)
+
+    b0 = A * ((A + 1) - (A - 1) * cos_w0 + 2 * sqrt_A * alpha)
+    b1 = 2 * A * ((A - 1) - (A + 1) * cos_w0)
+    b2 = A * ((A + 1) - (A - 1) * cos_w0 - 2 * sqrt_A * alpha)
+    a0 = (A + 1) + (A - 1) * cos_w0 + 2 * sqrt_A * alpha
+    a1 = -2 * ((A - 1) + (A + 1) * cos_w0)
+    a2 = (A + 1) + (A - 1) * cos_w0 - 2 * sqrt_A * alpha
+
+    b = np.array([b0, b1, b2]) / a0
+    a = np.array([a0, a1, a2]) / a0
+    return b, a
+
+
+def apply_bass(data, gain_db, sample_rate, cutoff_hz=BASS_CUTOFF_HZ):
+    if gain_db == 0 or len(data) == 0:
+        return data
+    b, a = _low_shelf_coeffs(gain_db, cutoff_hz, sample_rate)
+    filtered = np.empty_like(data)
+    for ch in range(data.shape[1]):
+        filtered[:, ch] = lfilter(b, a, data[:, ch])
+    return filtered.astype(np.float32)
+
+
+class _ActiveSound:
+    def __init__(self, data, key=None, gain=1.0):
+        self.data = data
+        self.key = key
+        self.gain = gain
+        self.position = 0
+
+    def read(self, frames):
+        end = min(self.position + frames, len(self.data))
+        chunk = self.data[self.position:end] * self.gain
+        self.position = end
+        finished = self.position >= len(self.data)
+        if len(chunk) < frames:
+            pad = np.zeros((frames - len(chunk), self.data.shape[1]), dtype=np.float32)
+            chunk = np.vstack([chunk, pad]) if len(chunk) else pad
+        return chunk, finished
+
+
+class _Limiter:
+    """Block-based peak limiter. Gain drops instantly when a block would
+    exceed the ceiling and recovers smoothly afterwards, so loud mixes
+    get quieter instead of distorting."""
+
+    def __init__(self):
+        self.gain = 1.0
+        blocks_per_second = SAMPLE_RATE / BLOCK_SIZE
+        self.release = 1.0 - np.exp(-1.0 / (LIMITER_RELEASE_S * blocks_per_second))
+
+    def process(self, block):
+        peak = float(np.abs(block).max()) if block.size else 0.0
+        target = min(1.0, LIMITER_CEILING / peak) if peak > 0 else 1.0
+        if target < self.gain:
+            # A downward ramp would let the start of the block overshoot.
+            self.gain = target
+            block *= target
+        else:
+            new_gain = self.gain + (target - self.gain) * self.release
+            block *= np.linspace(self.gain, new_gain, len(block), dtype=np.float32)[:, None]
+            self.gain = new_gain
+        np.clip(block, -1.0, 1.0, out=block)
+        return block
+
+
+class AudioEngine:
+    """Continuously mixes the selected microphone with triggered sound
+    clips and writes the result to the selected output device, so voice
+    and soundboard clips are heard together on the virtual mic. Can also
+    mirror sound clips (not the mic) to a local monitor device so you
+    can hear what's playing yourself, independently mutable."""
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self.input_stream = None
+        self.output_stream = None
+        self.monitor_stream = None
+        self.monitor_muted = False
+        self.input_channels = CHANNELS
+        self.output_channels = CHANNELS
+        self.monitor_channels = CHANNELS
+        self._mic_buffer = collections.deque()
+        self._mic_frames = 0
+        self._mic_ready = False
+        self._active_sounds = []
+        self._active_sounds_monitor = []
+        self.dropouts = 0
+        self.mic_gain = 1.0
+        self.mic_enabled = True  # False while muted or push-to-talk isn't held
+        self._mic_level = 1.0  # gain applied to the last block, for smooth changes
+        self.sound_gain = 1.0
+        self._output_limiter = _Limiter()
+        self._monitor_limiter = _Limiter()
+        self.on_error = None
+        self._started_at = 0.0
+        self._last_callback = {}
+        self._clip_cache = collections.OrderedDict()
+        self._clip_cache_bytes = 0
+        self._cache_lock = threading.Lock()
+        # Decoding runs here, not in the caller: pynput's keyboard hook
+        # blocks every keypress on the system until its callback returns.
+        self._requests = queue.Queue()
+        threading.Thread(target=self._worker, daemon=True).start()
+
+    @staticmethod
+    def _device_channels(device, output):
+        info = sd.query_devices(device)
+        key = "max_output_channels" if output else "max_input_channels"
+        return max(1, min(CHANNELS, info[key]))
+
+    @staticmethod
+    def _extra_settings(device):
+        # WASAPI shared mode only accepts the device's own sample rate
+        # unless Windows is allowed to convert.
+        hostapi = sd.query_hostapis(sd.query_devices(device)["hostapi"])["name"]
+        if hostapi == "Windows WASAPI":
+            return sd.WasapiSettings(auto_convert=True)
+        return None
+
+    def start(self, input_device, output_device, monitor_device):
+        self.stop()
+        self._started_at = time.monotonic()
+        self._last_callback = {}
+        self._mic_level = self.mic_gain if self.mic_enabled else 0.0
+        if input_device is not None:
+            self.input_channels = self._device_channels(input_device, output=False)
+            self.input_stream = sd.InputStream(
+                device=input_device,
+                channels=self.input_channels,
+                samplerate=SAMPLE_RATE,
+                blocksize=BLOCK_SIZE,
+                latency="high",
+                dtype="float32",
+                extra_settings=self._extra_settings(input_device),
+                callback=self._on_input,
+            )
+            self.input_stream.start()
+        if output_device is not None:
+            self.output_channels = self._device_channels(output_device, output=True)
+            self.output_stream = sd.OutputStream(
+                device=output_device,
+                channels=self.output_channels,
+                samplerate=SAMPLE_RATE,
+                blocksize=BLOCK_SIZE,
+                latency="high",
+                dtype="float32",
+                extra_settings=self._extra_settings(output_device),
+                callback=self._on_output,
+            )
+            self.output_stream.start()
+        if monitor_device is not None:
+            self.monitor_channels = self._device_channels(monitor_device, output=True)
+            self.monitor_stream = sd.OutputStream(
+                device=monitor_device,
+                channels=self.monitor_channels,
+                samplerate=SAMPLE_RATE,
+                blocksize=BLOCK_SIZE,
+                latency="high",
+                dtype="float32",
+                extra_settings=self._extra_settings(monitor_device),
+                callback=self._on_monitor_output,
+            )
+            self.monitor_stream.start()
+
+    def stop(self):
+        for attr in ("input_stream", "output_stream", "monitor_stream"):
+            stream = getattr(self, attr)
+            if stream is not None:
+                try:
+                    stream.stop()
+                    stream.close()
+                except Exception:
+                    pass  # the device may already be gone
+                setattr(self, attr, None)
+        with self._lock:
+            self._mic_buffer.clear()
+            self._mic_frames = 0
+            self._mic_ready = False
+            self._active_sounds = []
+            self._active_sounds_monitor = []
+            self.dropouts = 0
+            self._output_limiter = _Limiter()
+            self._monitor_limiter = _Limiter()
+
+    def lost_streams(self):
+        """Names ("input", "output") of open streams that have stopped
+        or stopped calling back, e.g. because the device was unplugged."""
+        now = time.monotonic()
+        lost = []
+        for name in ("input", "output"):
+            stream = getattr(self, f"{name}_stream")
+            if stream is None:
+                continue
+            last = self._last_callback.get(name, self._started_at)
+            if not stream.active or now - last > STREAM_TIMEOUT_S:
+                lost.append(name)
+        return lost
+
+    def stop_all(self):
+        with self._lock:
+            self._active_sounds = []
+            self._active_sounds_monitor = []
+
+    def stop_key(self, key):
+        with self._lock:
+            self._active_sounds = [s for s in self._active_sounds if s.key != key]
+            self._active_sounds_monitor = [s for s in self._active_sounds_monitor if s.key != key]
+
+    def set_monitor_muted(self, muted):
+        with self._lock:
+            self.monitor_muted = muted
+            if muted:
+                self._active_sounds_monitor = []
+
+    def _on_input(self, indata, frames, time_info, status):
+        self._last_callback["input"] = time.monotonic()
+        with self._lock:
+            if status:
+                self.dropouts += 1
+            self._mic_buffer.append(indata.copy())
+            self._mic_frames += len(indata)
+            while self._mic_frames > MIC_MAX_FRAMES:
+                self._mic_frames -= len(self._mic_buffer.popleft())
+
+    def _on_output(self, outdata, frames, time_info, status):
+        self._last_callback["output"] = time.monotonic()
+        with self._lock:
+            if status:
+                self.dropouts += 1
+            mixed = self._pull_mic_frames(frames, self.output_channels)
+            # Ramp gain changes over the block so muting doesn't click.
+            target = self.mic_gain if self.mic_enabled else 0.0
+            if target != self._mic_level:
+                mixed *= np.linspace(self._mic_level, target, frames, dtype=np.float32)[:, None]
+                self._mic_level = target
+            else:
+                mixed *= target
+            mixed += self._mix_sounds("_active_sounds", frames, self.output_channels)
+        outdata[:] = self._output_limiter.process(mixed)
+
+    def _on_monitor_output(self, outdata, frames, time_info, status):
+        with self._lock:
+            if status:
+                self.dropouts += 1
+            mixed = self._mix_sounds("_active_sounds_monitor", frames, self.monitor_channels)
+        outdata[:] = self._monitor_limiter.process(mixed)
+
+    def _mix_sounds(self, attr, frames, channels):
+        """Sum one block from each clip in the named list, drop finished
+        clips, and apply the soundboard volume. Caller holds the lock."""
+        mixed = np.zeros((frames, channels), dtype=np.float32)
+        still_active = []
+        for sound in getattr(self, attr):
+            chunk, finished = sound.read(frames)
+            mixed += chunk
+            if not finished:
+                still_active.append(sound)
+        setattr(self, attr, still_active)
+        mixed *= self.sound_gain
+        return mixed
+
+    def _pull_mic_frames(self, frames, channels):
+        out = np.zeros((frames, channels), dtype=np.float32)
+        if not self._mic_ready:
+            if self._mic_frames < MIC_TARGET_FRAMES:
+                return out
+            self._mic_ready = True
+
+        # The mic and output run on separate clocks. Nudge mic playback
+        # speed by ~0.2% to keep the cushion near its target instead of
+        # letting drift empty it (gaps) or overfill it (skips).
+        step = max(1, frames // 500)
+        need = frames
+        if self._mic_frames < MIC_TARGET_FRAMES:
+            need -= step
+        elif self._mic_frames > MIC_TARGET_FRAMES * 2:
+            need += step
+
+        raw = self._take_mic(need)
+        if len(raw) < need:
+            self._mic_ready = False  # ran dry; rebuild the cushion first
+            out[:len(raw)] = _match_channels(raw, channels)
+            return out
+        return _match_channels(_resample(raw, need, frames), channels)
+
+    def _take_mic(self, count):
+        parts, taken = [], 0
+        while taken < count and self._mic_buffer:
+            chunk = self._mic_buffer[0]
+            take = min(count - taken, len(chunk))
+            parts.append(chunk[:take])
+            if take < len(chunk):
+                self._mic_buffer[0] = chunk[take:]
+            else:
+                self._mic_buffer.popleft()
+            taken += take
+        self._mic_frames -= taken
+        if not parts:
+            return np.zeros((0, self.input_channels), dtype=np.float32)
+        return np.concatenate(parts)
+
+    def play_data(self, data, samplerate, key=None, gain=1.0):
+        """Queue audio for playback. A clip with the same key that is
+        still playing is stopped first, so re-triggering restarts it."""
+        if self.output_stream is None and self.monitor_stream is None:
+            raise RuntimeError("No output device selected.")
+        self._queue_clip(_resample(data, samplerate, SAMPLE_RATE), key, gain)
+
+    def _queue_clip(self, resampled, key, gain):
+        main_data = _match_channels(resampled, self.output_channels)
+        monitor_data = _match_channels(resampled, self.monitor_channels)
+        with self._lock:
+            if key is not None:
+                self._active_sounds = [s for s in self._active_sounds if s.key != key]
+                self._active_sounds_monitor = [s for s in self._active_sounds_monitor if s.key != key]
+            if self.output_stream is not None:
+                self._active_sounds.append(_ActiveSound(main_data, key, gain))
+            if self.monitor_stream is not None and not self.monitor_muted:
+                self._active_sounds_monitor.append(_ActiveSound(monitor_data, key, gain))
+
+    def play(self, path, gain=1.0):
+        """Queue a file for playback without blocking the caller. Errors
+        are reported through on_error."""
+        self._requests.put((path, gain, True))
+
+    def preload(self, paths):
+        """Decode files into the cache in the background."""
+        for path in paths:
+            self._requests.put((path, 1.0, False))
+
+    def _worker(self):
+        while True:
+            path, gain, play = self._requests.get()
+            try:
+                if play and self.output_stream is None and self.monitor_stream is None:
+                    raise RuntimeError("No output device selected.")
+                data = self._load_clip(path)
+                if play:
+                    self._queue_clip(data, os.path.abspath(path), gain)
+            except FileNotFoundError:
+                if play and self.on_error is not None:
+                    self.on_error(f"File not found: {path}")
+            except Exception as e:
+                if play and self.on_error is not None:
+                    self.on_error(f"{os.path.basename(path)}: {e}")
+
+    def _load_clip(self, path):
+        """Return the file resampled to SAMPLE_RATE, from the cache when
+        the file is unchanged."""
+        stat = os.stat(path)
+        key = (os.path.abspath(path), stat.st_mtime_ns, stat.st_size)
+        with self._cache_lock:
+            data = self._clip_cache.get(key)
+            if data is not None:
+                self._clip_cache.move_to_end(key)
+                return data
+        raw, samplerate = sf.read(path, dtype="float32", always_2d=True)
+        data = _resample(raw, samplerate, SAMPLE_RATE)
+        if data.nbytes > CLIP_CACHE_BYTES:
+            return data
+        with self._cache_lock:
+            for old_key in [k for k in self._clip_cache if k[0] == key[0]]:
+                self._clip_cache_bytes -= self._clip_cache.pop(old_key).nbytes
+            self._clip_cache[key] = data
+            self._clip_cache_bytes += data.nbytes
+            while self._clip_cache_bytes > CLIP_CACHE_BYTES:
+                _, old = self._clip_cache.popitem(last=False)
+                self._clip_cache_bytes -= old.nbytes
+        return data

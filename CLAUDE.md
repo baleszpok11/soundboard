@@ -3,6 +3,13 @@
 Cross-platform Python soundboard that mixes the mic with sound clips into a
 virtual audio cable.
 
+## Layout
+- `soundboard.py` - entry point only (startup, error dialogs)
+- `app.py` - the `Soundboard` window, built from mixins: `devices.py`,
+  `mic_hotkeys.py`, `sound_list.py`, `download_tab.py`, `editor_tab.py`
+- Support modules: `audio_engine.py`, `hotkeys.py` (listener and platform
+  quirks), `dialogs.py`, `downloader.py` (yt-dlp), `config.py`, `theme.py`
+
 ## Stack notes
 - Windows: device lists filtered to one host API (WASAPI with
   auto_convert, falling back to MME; choice saved as config "host_api")
@@ -32,6 +39,8 @@ virtual audio cable.
 - Keep code changes minimal and focused on the requested feature.
 - No emojis in code or comments.
 - Keep explanations brief.
+- Only work on Linux-specific bugs or packaging when explicitly asked.
+  Report them and move on otherwise.
 
 ## Workflow
 - One branch per issue off an up-to-date master: `issue-<number>-<short-slug>`
