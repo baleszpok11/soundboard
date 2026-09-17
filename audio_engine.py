@@ -269,6 +269,15 @@ class AudioEngine:
             self._active_sounds = [s for s in self._active_sounds if s.key != key]
             self._active_sounds_monitor = [s for s in self._active_sounds_monitor if s.key != key]
 
+    def playback_progress(self, key):
+        """How far the clip playing under this key has got, 0 to 1, or None
+        when nothing with that key is playing."""
+        with self._lock:
+            for sound in (*self._active_sounds, *self._active_sounds_monitor):
+                if sound.key == key and len(sound.data):
+                    return min(1.0, sound.position / len(sound.data))
+        return None
+
     def set_monitor_muted(self, muted):
         with self._lock:
             self.monitor_muted = muted

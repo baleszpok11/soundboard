@@ -58,6 +58,10 @@ class Soundboard(DeviceMixin, MicHotkeyMixin, SoundListMixin, DownloadMixin, Edi
         self._editor_label = None
         self.editor_samplerate = None
         self._editor_sound_paths = {}
+        self._editor_undo = []
+        self._editor_committed = None
+        self._editor_commit = None
+        self._playhead_poll = None
 
         self.hostapi = self._pick_hostapi(self.config.get("host_api"))
         self.input_devices = self._list_devices(output=False)
