@@ -252,6 +252,23 @@ weekly and opens an issue when a newer yt-dlp is out, as a reminder to
 publish a release. Note: the repo must be public (or the
 downloader needs read access) for others to reach the Releases page.
 
+## Reporting a bug
+
+"Report a bug" on the Soundboard tab, and the button on any error dialog,
+open a window that shows the whole report before anything happens.
+Nothing leaves your computer until you press Send.
+
+A report contains what you type, an optional contact, the most recent
+traceback from `soundboard_error.log`, the app version, your OS, the host
+API, the names of the selected input and output devices, and how many
+sounds are on your board. Folder names are replaced with `~` and no sound
+file names are included.
+
+Send needs the relay described in [relay/](relay/). Until one is deployed
+it opens GitHub's prefilled "new issue" page in your browser (which needs
+a GitHub account) and copies the report to your clipboard. Copy report
+does the same without sending anything anywhere.
+
 ## Notes
 
 - Audio is mixed at a fixed 48000 Hz. Each device uses its own channel

@@ -25,6 +25,9 @@ virtual audio cable.
   Monitoring/Accessibility permission is detected and shown as a warning
 - Errors: Tk callback errors and startup failures show a dialog and append
   to soundboard_error.log; config writes are atomic
+- Bug reports: the dialog offers "Report bug"; reports go to the relay in
+  relay/ (REPORT_URL in bug_report.py), falling back to a prefilled issue
+  URL. Never put a GitHub token in the app - it can be extracted
 - JSON file for config (no database); devices stored by name, sounds by
   filename relative to Sounds/
 - PyInstaller (standalone executables; onefile on Windows/Linux, onedir
@@ -49,4 +52,5 @@ virtual audio cable.
   closes the issue. Don't close issues by hand or push to master directly.
 - Squash-merge (`gh pr merge --squash`); the repo deletes the source branch
   on merge. Merge only when the user says so.
-- Releases: tag master (`vX.Y.Z`) after merging; CI builds and publishes.
+- Releases: bump `APP_VERSION` in config.py, then tag master (`vX.Y.Z`)
+  after merging; CI builds and publishes.

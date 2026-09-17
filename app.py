@@ -15,7 +15,9 @@ from config import (
     save_config,
     unique_path,
 )
+from audio_engine import sd
 from devices import DeviceMixin
+from dialogs import ReportDialog, handle_exception
 from download_tab import DownloadMixin
 from editor_tab import EditorMixin
 from mic_hotkeys import MicHotkeyMixin
@@ -83,6 +85,9 @@ class Soundboard(DeviceMixin, MicHotkeyMixin, SoundListMixin, DownloadMixin, Edi
                 self.config[key] = self._match_device_name(devices, stored) or stored
         save_config(self.config)
 
+        # From here on an error can be reported with the config and devices.
+        self.root.report_callback_exception = self._on_ui_error
+
         self.tabview = ctk.CTkTabview(
             self.root,
             fg_color=COLOR_SURFACE,
@@ -121,6 +126,20 @@ class Soundboard(DeviceMixin, MicHotkeyMixin, SoundListMixin, DownloadMixin, Edi
         )
         if self.config["close_to_tray"]:
             self._start_tray()
+
+    def _on_ui_error(self, exc_type, exc_value, exc_tb):
+        handle_exception(self.root, exc_type, exc_value, exc_tb, self.config, self._host_api_name())
+
+    def _host_api_name(self):
+        if self.hostapi is None:
+            return None
+        try:
+            return sd.query_hostapis(self.hostapi)["name"]
+        except Exception:
+            return None
+
+    def report_bug(self):
+        ReportDialog(self.root, config=self.config, host_api=self._host_api_name()).wait_window()
 
     def _save_config_soon(self):
         # Sliders fire continuously while dragged; write once they settle.

@@ -1,0 +1,11 @@
+name = "soundboard-report-relay"
+main = "worker.js"
+compatibility_date = "2026-01-01"
+
+# Optional: rate limiting per IP. Create it with
+#   npx wrangler kv namespace create REPORTS
+# and paste the id it prints here. Without it the worker still runs, but
+# without a rate limit.
+# [[kv_namespaces]]
+# binding = "REPORTS"
+# id = "paste-the-id-here"
