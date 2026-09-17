@@ -188,7 +188,12 @@ class SoundListMixin:
         )
         self.list_frame.pack(fill="both", expand=True, padx=4, pady=6)
         self._grid_columns = 0
-        self.list_frame.bind("<Configure>", self._on_list_resize)
+        # add="+" matters: CTkScrollableFrame binds <Configure> on this same
+        # frame to refresh the canvas scrollregion. Replacing that binding
+        # leaves the region empty, and an empty region means the canvas
+        # believes everything fits - no scrollbar, no wheel, and every row
+        # past the first screenful unreachable.
+        self.list_frame.bind("<Configure>", self._on_list_resize, add="+")
         self._drag_from = None
         self._playing_widgets = {}
         self._refresh_sound_list()
