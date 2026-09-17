@@ -16,6 +16,8 @@ together, from one virtual microphone.
 - Play sounds on click or via a global hotkey, even while unfocused
 - Enable/disable each sound's hotkey independently with a checkbox,
   without removing it from the board
+- Profiles: keep separate boards for different games or groups and switch
+  between them, each with its own sounds and hotkeys
 - Mixes your real microphone with soundboard clips in real time, so
   people hear both at once — no separate mixer app needed
 - Choose which microphone (input) and which virtual cable (output) are used
@@ -166,6 +168,14 @@ too; if so, leave it off.
 - "Loop" in the same menu makes a sound repeat until stopped; looping
   sounds are marked "(loop)" on the board. Turning Loop off stops the
   repeat straight away rather than waiting for the current pass to end.
+- **Profile:** each profile is its own board - its own sounds, hotkeys,
+  order and per-sound volumes. Your devices, mic settings, push-to-talk
+  and the mic/soundboard volumes are shared, so switching profiles never
+  changes your audio routing. **Manage** creates, renames, duplicates or
+  deletes one; the last profile can't be deleted, and deleting one never
+  deletes the sound files. Because hotkeys are per profile, the same key
+  can play something different in each. Switching stops whatever the old
+  profile was playing.
 - Type in **Search sounds...** to filter the list. **List/Grid** switches
   between rows and big buttons (click to play; right-click for options).
 - Drag a row by its `::` handle to reorder it. **More** has Rename, Move
@@ -314,6 +324,9 @@ does the same without sending anything anywhere.
   warning with an "Open settings" button while hotkeys are blocked;
   restart Soundboard after allowing it. Because the macOS build isn't
   notarized, each new version may need the permission granted again.
+- Sounds live in profiles in `soundboard_config.json`. A config from
+  before profiles is migrated on first run: everything it had becomes a
+  profile called "Default", keeping its sounds, hotkeys and order.
 - Sounds are stored in `soundboard_config.json` by filename, relative to
   `Sounds/`, so you can move the whole folder. Sounds added by older
   versions keep their absolute path; moving or renaming those files will
