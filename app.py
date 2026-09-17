@@ -66,6 +66,7 @@ class Soundboard(DeviceMixin, MicHotkeyMixin, SoundListMixin, DownloadMixin, Edi
         self._editor_committed = None
         self._editor_commit = None
         self._playhead_poll = None
+        self._playing_poll = None
 
         self.hostapi = self._pick_hostapi(self.config.get("host_api"))
         self.input_devices = self._list_devices(output=False)
@@ -155,6 +156,9 @@ class Soundboard(DeviceMixin, MicHotkeyMixin, SoundListMixin, DownloadMixin, Edi
         if self._pending_save is not None:
             self.root.after_cancel(self._pending_save)
             self._flush_config()
+        if self._playing_poll is not None:
+            self.root.after_cancel(self._playing_poll)
+            self._playing_poll = None
         self.audio_engine.stop()
         if self.hotkey_listener is not None:
             self.hotkey_listener.stop()
