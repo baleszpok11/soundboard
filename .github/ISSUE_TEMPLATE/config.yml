@@ -1,0 +1,16 @@
+# Kept true on purpose: the app's bug-report dialog falls back to opening
+# issues/new?title=...&body=..., and GitHub redirects that to the template
+# chooser (dropping the prefilled report) when blank issues are disabled.
+blank_issues_enabled: true
+contact_links:
+  - name: Setup help (virtual audio device, no sound, hotkeys)
+    url: https://github.com/baleszpok11/soundboard#virtual-audio-device-by-platform
+    about: >-
+      Most "nobody can hear my sounds" problems are routing. The README,
+      and the ? button in the app, walk through it per OS.
+  - name: Report a bug from inside the app
+    url: https://github.com/baleszpok11/soundboard#reporting-a-bug
+    about: >-
+      The "Report a bug" button on the Soundboard tab fills in your OS,
+      version, devices and recent log for you, and shows you the whole
+      report before anything is sent.
