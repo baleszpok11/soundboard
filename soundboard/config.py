@@ -30,7 +30,7 @@ def _data_dir():
     return os.path.dirname(os.path.abspath(sys.executable))
 
 
-APP_VERSION = "0.7.0"  # bump before tagging a release
+APP_VERSION = "0.9.0"  # bump before tagging a release; CI checks the tag matches
 DEFAULT_PROFILE = "Default"
 APP_DIR = _data_dir()
 CONFIG_PATH = os.path.join(APP_DIR, "soundboard_config.json")
