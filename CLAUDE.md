@@ -39,6 +39,8 @@ virtual audio cable.
 - Keep code changes minimal and focused on the requested feature.
 - No emojis in code or comments.
 - Keep explanations brief.
+- Only work on Linux-specific bugs or packaging when explicitly asked.
+  Report them and move on otherwise.
 
 ## Workflow
 - One branch per issue off an up-to-date master: `issue-<number>-<short-slug>`
