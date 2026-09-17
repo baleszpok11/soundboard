@@ -136,6 +136,26 @@ pavucontrol remembers these choices for next time. "Hear soundboard" may
 not work on Linux, because its stream can end up routed to Soundboard
 too; if so, leave it off.
 
+## Where your board is kept
+
+A built app keeps `soundboard_config.json` and your `Sounds/` folder in
+the standard per-user location:
+
+| | |
+| --- | --- |
+| Windows | `%APPDATA%\Soundboard` |
+| macOS | `~/Documents/Soundboard` |
+| Linux | `~/.local/share/Soundboard` |
+
+So the executable can be moved, replaced by an update, or run straight
+out of a download folder without your board going with it. Running from
+source, everything stays in the project folder as before.
+
+Older builds kept both beside the executable. If you have a board there,
+it is copied across the first time a newer build starts — copied, not
+moved, so the old folder stays exactly as it was until you delete it
+yourself.
+
 ## Usage
 
 - **Microphone (input):** your real microphone — this is what gets mixed
