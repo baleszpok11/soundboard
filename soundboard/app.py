@@ -19,13 +19,14 @@ from .config import (
 )
 from .audio_engine import sd
 from .devices import DeviceMixin
-from .dialogs import ReportDialog, handle_exception
+from .dialogs import ReportDialog, UpdateDialog, handle_exception
 from .download_tab import DownloadMixin
 from .editor_tab import EditorMixin
 from .mic_hotkeys import MicHotkeyMixin
 from .share_tab import ShareMixin
 from .sound_list import SoundListMixin
 from .theme import COLOR_BG, COLOR_ERROR, COLOR_ORANGE, COLOR_ORANGE_HOVER, COLOR_ROW, COLOR_SURFACE, COLOR_TEXT
+from . import updater
 from .tray import TrayMixin
 from .tutorial import TutorialWindow
 
@@ -119,6 +120,15 @@ class Soundboard(DeviceMixin, MicHotkeyMixin, SoundListMixin, DownloadMixin, Edi
         self.help_button.place(in_=self.tabview, relx=1.0, x=-10, y=6, anchor="ne")
         self._tutorial = None
 
+        # Same row as the ? - it is where anything global lives. Hidden
+        # until a check finds something, so it is never a dead control.
+        self.update_button = ctk.CTkButton(
+            self.root, text="", height=28, command=self.open_update,
+            fg_color=COLOR_ORANGE, hover_color=COLOR_ORANGE_HOVER, text_color=COLOR_BG,
+        )
+        self._update_release = None
+        self._start_update_check()
+
         board_tab = self.tabview.add("Soundboard")
         download_tab = self.tabview.add("Download")
         editor_tab = self.tabview.add("Sound Editor")
@@ -160,6 +170,35 @@ class Soundboard(DeviceMixin, MicHotkeyMixin, SoundListMixin, DownloadMixin, Edi
         """The active profile's sounds. Everything else in the config is
         shared across profiles."""
         return profile_sounds(self.config)
+
+    def _start_update_check(self):
+        """Ask GitHub what the latest release is, in the background. A
+        failed or slow check costs nothing: the button simply never
+        appears."""
+        updater.clear_old_binary()
+        if not self.config.get("check_for_updates", True):
+            return
+        updater.check_async(lambda release: self.root.after(0, self._on_update_found, release))
+
+    def _on_update_found(self, release):
+        if release is None or release.version == self.config.get("skipped_version"):
+            return
+        self._update_release = release
+        self.update_button.configure(text=f"Update to {release.version}")
+        self.update_button.place(in_=self.tabview, relx=1.0, x=-46, y=6, anchor="ne")
+
+    def open_update(self):
+        if self._update_release is None:
+            return
+        return UpdateDialog(
+            self.root, self._update_release, config=self.config,
+            on_skip=self._on_update_skipped,
+        )
+
+    def _on_update_skipped(self):
+        save_config(self.config)
+        self._update_release = None
+        self.update_button.place_forget()
 
     def open_tutorial(self, page=None):
         """One window, reused: pressing ? again raises the open one rather

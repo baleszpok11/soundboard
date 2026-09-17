@@ -30,7 +30,7 @@ def _data_dir():
     return os.path.dirname(os.path.abspath(sys.executable))
 
 
-APP_VERSION = "0.7.0"  # bump before tagging a release
+APP_VERSION = "0.9.0"  # bump before tagging a release; CI checks the tag matches
 DEFAULT_PROFILE = "Default"
 APP_DIR = _data_dir()
 CONFIG_PATH = os.path.join(APP_DIR, "soundboard_config.json")
@@ -97,6 +97,8 @@ def load_config():
     config.setdefault("ptt_hotkey", None)
     config.setdefault("sound_view", "list")
     config.setdefault("close_to_tray", False)
+    config.setdefault("check_for_updates", True)
+    config.setdefault("skipped_version", None)
     _load_profiles(config)
     return config
 
