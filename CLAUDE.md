@@ -8,9 +8,10 @@ virtual audio cable.
 - `soundboard/` - everything else, imported with relative imports
   - `app.py` - the `Soundboard` window, built from mixins: `devices.py`,
     `mic_hotkeys.py`, `sound_list.py`, `download_tab.py`, `editor_tab.py`
-  - Support modules: `audio_engine.py`, `hotkeys.py` (listener and platform
-    quirks), `dialogs.py`, `downloader.py` (yt-dlp), `config.py`, `theme.py`,
-    `tray.py`, `autostart.py`, `bug_report.py`
+  - Support modules: `audio_engine.py`, `dsp.py` (offline clip processing
+    for the editor: filters, phase vocoder), `hotkeys.py` (listener and
+    platform quirks), `dialogs.py`, `downloader.py` (yt-dlp), `config.py`,
+    `theme.py`, `tray.py`, `autostart.py`, `bug_report.py`
 - Config, `Sounds/` and `assets/` live at the repo root, not in the
   package: `config.py` anchors them one level up from itself
 
@@ -27,6 +28,12 @@ virtual audio cable.
   the main thread before starting pynput (pynput reads it on its listener
   thread, which current macOS kills the process for). Missing Input
   Monitoring/Accessibility permission is detected and shown as a warning
+- Editor DSP lives in dsp.py, not audio_engine.py: it works on a whole
+  clip and can take a second, while the engine has to fill a block
+  before the sound card asks again. Pitch and speed are separate there
+  (phase vocoder + inverse resample); the editor's Tape toggle bypasses
+  both and uses one plain resample, which sounds better than a round
+  trip through the vocoder
 - Errors: Tk callback errors and startup failures show a dialog and append
   to soundboard_error.log; config writes are atomic
 - Sharing: board_file.py reads/writes .sbboard files (links, not audio);

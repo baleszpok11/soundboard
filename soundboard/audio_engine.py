@@ -16,14 +16,12 @@ except OSError as e:
 else:
     PORTAUDIO_ERROR = None
 import soundfile as sf
-from scipy.signal import lfilter
 
 SAMPLE_RATE = 48000
 CHANNELS = 2
 BLOCK_SIZE = 1024
 MIC_TARGET_FRAMES = SAMPLE_RATE // 10  # 100 ms cushion against uneven mic delivery
 MIC_MAX_FRAMES = SAMPLE_RATE // 2  # drop older mic audio beyond 500 ms
-BASS_CUTOFF_HZ = 200.0
 CLIP_CACHE_BYTES = 512 * 1024 * 1024  # decoded clips kept in memory
 LIMITER_CEILING = 0.89  # about -1 dBFS
 LIMITER_RELEASE_S = 0.3
@@ -54,37 +52,6 @@ def _match_channels(data, channels):
     if channels == 1:
         return data.mean(axis=1, keepdims=True).astype(np.float32)
     return data[:, :channels]
-
-
-def _low_shelf_coeffs(gain_db, cutoff_hz, sample_rate, slope=1.0):
-    """RBJ Audio EQ Cookbook low-shelf biquad coefficients."""
-    A = 10 ** (gain_db / 40)
-    w0 = 2 * np.pi * cutoff_hz / sample_rate
-    cos_w0 = np.cos(w0)
-    sin_w0 = np.sin(w0)
-    alpha = sin_w0 / 2 * np.sqrt((A + 1 / A) * (1 / slope - 1) + 2)
-    sqrt_A = np.sqrt(A)
-
-    b0 = A * ((A + 1) - (A - 1) * cos_w0 + 2 * sqrt_A * alpha)
-    b1 = 2 * A * ((A - 1) - (A + 1) * cos_w0)
-    b2 = A * ((A + 1) - (A - 1) * cos_w0 - 2 * sqrt_A * alpha)
-    a0 = (A + 1) + (A - 1) * cos_w0 + 2 * sqrt_A * alpha
-    a1 = -2 * ((A - 1) + (A + 1) * cos_w0)
-    a2 = (A + 1) + (A - 1) * cos_w0 - 2 * sqrt_A * alpha
-
-    b = np.array([b0, b1, b2]) / a0
-    a = np.array([a0, a1, a2]) / a0
-    return b, a
-
-
-def apply_bass(data, gain_db, sample_rate, cutoff_hz=BASS_CUTOFF_HZ):
-    if gain_db == 0 or len(data) == 0:
-        return data
-    b, a = _low_shelf_coeffs(gain_db, cutoff_hz, sample_rate)
-    filtered = np.empty_like(data)
-    for ch in range(data.shape[1]):
-        filtered[:, ch] = lfilter(b, a, data[:, ch])
-    return filtered.astype(np.float32)
 
 
 def test_tone(seconds=TEST_TONE_S, hz=TEST_TONE_HZ):
