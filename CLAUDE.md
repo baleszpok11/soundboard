@@ -40,6 +40,11 @@ virtual audio cable.
   The editor's controls sit in a CTkScrollableFrame with the buttons
   packed side="bottom" first - pack them after and the scrolling frame
   takes the whole cavity and leaves them nothing
+- Help: the ? button (top right, placed on the tabview's own row - the
+  window title bar is non-client area and Tk cannot put a button there)
+  opens tutorial.py, one non-modal window per app. Its pages are data,
+  and cover the same ground as the README's virtual-device section;
+  change both together
 - Errors: Tk callback errors and startup failures show a dialog and append
   to soundboard_error.log; config writes are atomic
 - Sharing: board_file.py reads/writes .sbboard files (links, not audio);

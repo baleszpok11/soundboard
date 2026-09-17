@@ -27,6 +27,7 @@ from .share_tab import ShareMixin
 from .sound_list import SoundListMixin
 from .theme import COLOR_BG, COLOR_ERROR, COLOR_ORANGE, COLOR_ORANGE_HOVER, COLOR_ROW, COLOR_SURFACE, COLOR_TEXT
 from .tray import TrayMixin
+from .tutorial import TutorialWindow
 
 
 class Soundboard(DeviceMixin, MicHotkeyMixin, SoundListMixin, DownloadMixin, EditorMixin,
@@ -105,6 +106,19 @@ class Soundboard(DeviceMixin, MicHotkeyMixin, SoundListMixin, DownloadMixin, Edi
         )
         self.tabview.pack(fill="both", expand=True, padx=8, pady=8)
 
+        # The ask was the window's own title bar, which Tk cannot reach: it
+        # is the non-client area, and the only way in is to drop the native
+        # one and rebuild snap, tiling and the caption buttons by hand. The
+        # tab strip's row is the next row down, and is where this goes.
+        self.help_button = ctk.CTkButton(
+            self.root, text="?", width=28, height=28, command=self.open_tutorial,
+            fg_color=COLOR_ROW, hover_color=COLOR_SURFACE, text_color=COLOR_ORANGE,
+            border_width=1, border_color=COLOR_ORANGE,
+            font=ctk.CTkFont(size=14, weight="bold"),
+        )
+        self.help_button.place(in_=self.tabview, relx=1.0, x=-10, y=6, anchor="ne")
+        self._tutorial = None
+
         board_tab = self.tabview.add("Soundboard")
         download_tab = self.tabview.add("Download")
         editor_tab = self.tabview.add("Sound Editor")
@@ -146,6 +160,17 @@ class Soundboard(DeviceMixin, MicHotkeyMixin, SoundListMixin, DownloadMixin, Edi
         """The active profile's sounds. Everything else in the config is
         shared across profiles."""
         return profile_sounds(self.config)
+
+    def open_tutorial(self, page=None):
+        """One window, reused: pressing ? again raises the open one rather
+        than stacking another copy on top of it."""
+        if self._tutorial is not None and self._tutorial.winfo_exists():
+            self._tutorial.deiconify()
+            self._tutorial.lift()
+            self._tutorial.focus_force()
+            return self._tutorial
+        self._tutorial = TutorialWindow(self.root, page)
+        return self._tutorial
 
     def _on_ui_error(self, exc_type, exc_value, exc_tb):
         handle_exception(self.root, exc_type, exc_value, exc_tb, self.config, self._host_api_name())

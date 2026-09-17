@@ -65,6 +65,9 @@ Requirements: Python 3.9+ with a current Tk. On macOS, the Python that
 ships with Apple's Command Line Tools has an outdated Tk that shows a
 blank window; use Homebrew instead (`brew install python@3.12 python-tk@3.12`).
 
+0. Press the **?** at the top right, on the tab strip's row: it opens a
+   step-by-step setup guide for your system, with the same instructions
+   as below. It can stay open while you follow along.
 1. Set up a virtual audio device for your OS (see below).
 2. Install dependencies:
 

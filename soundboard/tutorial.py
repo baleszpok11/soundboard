@@ -1,0 +1,273 @@
+"""The setup tutorial behind the ? button.
+
+Getting the virtual cable working is the hardest part of this app and
+where people give up. The README explains it, but nobody reads a README
+before running an exe, so the same explanation lives here, in the app,
+at the moment they are stuck.
+
+The three platforms are genuinely different jobs, so each gets its own
+page and the running one opens first.
+"""
+
+import platform
+import tkinter as tk
+import webbrowser
+
+import customtkinter as ctk
+
+from .theme import (
+    COLOR_BG,
+    COLOR_ORANGE,
+    COLOR_ORANGE_HOVER,
+    COLOR_ROW,
+    COLOR_SURFACE,
+    COLOR_TEXT,
+    COLOR_TEXT_DIM,
+)
+
+WINDOWS = "Windows"
+MACOS = "macOS"
+LINUX = "Linux"
+PLATFORMS = (WINDOWS, MACOS, LINUX)
+
+WINDOW_SIZE = "760x780"
+WRAP_PX = 640
+
+CABLE_URL = "https://vb-audio.com/Cable/"
+VAC_URL = "https://github.com/frgnca/VirtualAudioCable"
+BLACKHOLE_URL = "https://github.com/ExistentialAudio/BlackHole"
+
+# Each page is a list of blocks, rendered in order:
+#   ("text", body)              a paragraph
+#   ("step", title, body)       a numbered step
+#   ("code", command)           something to paste into a terminal
+#   ("link", label, url)        a button that opens a page in the browser
+#   ("warn", body)              the mistakes people actually make
+# The README covers the same ground; when one changes, change both.
+_WHY = (
+    "Discord and games can only listen to one microphone. Soundboard mixes "
+    "your voice and your clips together and sends the mix to an output "
+    "device, so the trick is to make that output device look like a "
+    "microphone. That is what a virtual audio cable does: whatever is "
+    "played into one end comes out of the other as a microphone."
+)
+
+_BOTH_ENDS = (
+    "The cable has two ends, and they are easy to mix up. Soundboard plays "
+    "into the input end. Discord listens to the output end."
+)
+
+_CHECK = (
+    "Press Test on the Soundboard tab. It plays a short tone into the "
+    "virtual mic output, and the output meter next to it should move. If "
+    "the meter moves, the routing works and you can go live; if it does "
+    "not, the output device is wrong."
+)
+
+_FEEDBACK = (
+    "If people say they hear themselves back, PC audio is getting into "
+    "your virtual mic. Check three things: your system's default playback "
+    "device is your speakers or headphones, Discord's Output Device is "
+    "too, and Soundboard's Microphone is your real mic. Soundboard shows "
+    "a red warning when it spots either problem itself."
+)
+
+PAGES = {
+    WINDOWS: [
+        ("text", _WHY),
+        ("step", "Install a virtual cable",
+         "VB-CABLE is the usual choice and is free. Download it, unzip it, "
+         "right-click the setup for your system and choose Run as "
+         "administrator, then reboot. VirtualAudioCable is an open-source "
+         "alternative if you prefer one."),
+        ("link", "Open vb-audio.com/Cable", CABLE_URL),
+        ("link", "Open VirtualAudioCable on GitHub", VAC_URL),
+        ("step", "Point Soundboard at it",
+         "On the Soundboard tab, set Microphone to your real microphone and "
+         "Virtual mic output to CABLE Input. " + _BOTH_ENDS),
+        ("step", "Check it before you go live", _CHECK),
+        ("step", "Tell Discord to listen to the cable",
+         "In Discord, open Settings, then Voice & Video, and set Input "
+         "Device to CABLE Output. Leave Output Device as your headphones."),
+        ("warn", _FEEDBACK),
+        ("text",
+         "Tick Hear soundboard if you want to hear your own clips on your "
+         "headphones. Games with their own push-to-talk only send sound "
+         "while the key is held, so use open mic or hold the key while a "
+         "clip plays."),
+    ],
+    MACOS: [
+        ("text", _WHY),
+        ("step", "Install BlackHole",
+         "BlackHole is free and open-source. The 2-channel version is the "
+         "one you want. Install it and reboot."),
+        ("link", "Open BlackHole on GitHub", BLACKHOLE_URL),
+        ("step", "Point Soundboard at it",
+         "On the Soundboard tab, set Microphone to your real microphone and "
+         "Virtual mic output to BlackHole 2ch. " + _BOTH_ENDS),
+        ("step", "Allow the microphone",
+         "macOS asks for microphone permission the first time. If you "
+         "missed the prompt, turn Soundboard on under System Settings, "
+         "Privacy & Security, Microphone. Global hotkeys need Input "
+         "Monitoring in the same place."),
+        ("step", "Check it before you go live", _CHECK),
+        ("step", "Tell Discord to listen to the cable",
+         "In Discord, open Settings, then Voice & Video, and set Input "
+         "Device to BlackHole 2ch. Leave Output Device as your headphones."),
+        ("warn", _FEEDBACK),
+    ],
+    LINUX: [
+        ("text",
+         "There is no driver to install. PulseAudio and PipeWire can make "
+         "the cable themselves, but Soundboard cannot list their devices by "
+         "name, so the routing is done in pavucontrol rather than in the "
+         "app. It is fiddlier than the other two."),
+        ("step", "Install what's missing",
+         "Soundboard needs the PortAudio library, and you need pavucontrol "
+         "to do the routing."),
+        ("code", "sudo apt install libportaudio2 pavucontrol"),
+        ("step", "Make the cable",
+         "The first command creates a Soundboard output. The second turns "
+         "whatever is played into it into a Soundboard_Mic microphone that "
+         "Discord can select. Both last until you log out; add them to your "
+         "PulseAudio or PipeWire startup config to keep them."),
+        ("code",
+         "pactl load-module module-null-sink sink_name=soundboard "
+         "sink_properties=device.description=Soundboard"),
+        ("code",
+         "pactl load-module module-remap-source master=soundboard.monitor "
+         "source_name=soundboard_mic "
+         "source_properties=device.description=Soundboard_Mic"),
+        ("step", "Point Soundboard at pulse",
+         "Set both Microphone and Virtual mic output to pulse, or to "
+         "default if there is no pulse. The real choice happens in "
+         "pavucontrol."),
+        ("step", "Route it in pavucontrol",
+         "Play a sound. In pavucontrol's Playback tab, find Soundboard's "
+         "stream and switch it to Soundboard. In the Recording tab, switch "
+         "Soundboard's stream to your real microphone. pavucontrol "
+         "remembers both for next time."),
+        ("step", "Check it before you go live", _CHECK),
+        ("step", "Tell Discord to listen to the cable",
+         "In Discord, set Input Device to Soundboard_Mic. Leave Output "
+         "Device as your headphones."),
+        ("warn", _FEEDBACK),
+        ("text",
+         "Hear soundboard often does not work here, because its stream can "
+         "end up routed into Soundboard as well. Leave it off if it "
+         "misbehaves."),
+    ],
+}
+
+
+def current_platform():
+    system = platform.system()
+    if system == "Windows":
+        return WINDOWS
+    if system == "Darwin":
+        return MACOS
+    return LINUX
+
+
+class TutorialWindow(ctk.CTkToplevel):
+    """Not modal on purpose: it is meant to be left open on a second
+    screen while you follow along in the app."""
+
+    def __init__(self, parent, page=None):
+        super().__init__(parent)
+        self.title("Setting up Soundboard")
+        self.geometry(WINDOW_SIZE)
+        self.minsize(520, 400)
+        self.configure(fg_color=COLOR_BG)
+
+        header = ctk.CTkFrame(self, fg_color=COLOR_SURFACE)
+        header.pack(fill="x", padx=8, pady=8)
+        ctk.CTkLabel(
+            header, text="Your system:", text_color=COLOR_TEXT,
+        ).pack(side="left", padx=(10, 8), pady=10)
+        self.platform_picker = ctk.CTkSegmentedButton(
+            header, values=list(PLATFORMS), command=self._show_page,
+            selected_color=COLOR_ORANGE, selected_hover_color=COLOR_ORANGE_HOVER,
+            unselected_color=COLOR_ROW, unselected_hover_color=COLOR_SURFACE,
+            text_color=COLOR_TEXT,
+        )
+        self.platform_picker.pack(side="left", pady=10)
+
+        self.body = ctk.CTkScrollableFrame(self, fg_color=COLOR_BG)
+        self.body.pack(fill="both", expand=True, padx=8, pady=(0, 8))
+
+        self.bind("<Escape>", lambda e: self.destroy())
+        self.transient(parent)
+        page = page if page in PAGES else current_platform()
+        self.platform_picker.set(page)
+        self._show_page(page)
+
+    def _show_page(self, page):
+        for child in self.body.winfo_children():
+            child.destroy()
+        step = 0
+        for block in PAGES[page]:
+            kind = block[0]
+            if kind == "step":
+                step += 1
+                self._step(step, block[1], block[2])
+            elif kind == "text":
+                self._paragraph(block[1], COLOR_TEXT_DIM)
+            elif kind == "warn":
+                self._warning(block[1])
+            elif kind == "code":
+                self._code(block[1])
+            elif kind == "link":
+                self._link(block[1], block[2])
+
+    def _paragraph(self, text, color, indent=10):
+        ctk.CTkLabel(
+            self.body, text=text, text_color=color, wraplength=WRAP_PX,
+            justify="left", anchor="w",
+        ).pack(fill="x", padx=(indent, 10), pady=(6, 2))
+
+    def _step(self, number, title, body):
+        frame = ctk.CTkFrame(self.body, fg_color=COLOR_SURFACE)
+        frame.pack(fill="x", padx=4, pady=6)
+        ctk.CTkLabel(
+            frame, text=f"{number}. {title}", text_color=COLOR_ORANGE,
+            anchor="w", font=ctk.CTkFont(size=14, weight="bold"),
+        ).pack(fill="x", padx=12, pady=(10, 0))
+        ctk.CTkLabel(
+            frame, text=body, text_color=COLOR_TEXT, wraplength=WRAP_PX,
+            justify="left", anchor="w",
+        ).pack(fill="x", padx=12, pady=(2, 10))
+
+    def _warning(self, text):
+        frame = ctk.CTkFrame(self.body, fg_color=COLOR_SURFACE,
+                             border_width=1, border_color=COLOR_ORANGE)
+        frame.pack(fill="x", padx=4, pady=6)
+        ctk.CTkLabel(
+            frame, text="If others hear themselves back", text_color=COLOR_ORANGE,
+            anchor="w", font=ctk.CTkFont(size=14, weight="bold"),
+        ).pack(fill="x", padx=12, pady=(10, 0))
+        ctk.CTkLabel(
+            frame, text=text, text_color=COLOR_TEXT, wraplength=WRAP_PX,
+            justify="left", anchor="w",
+        ).pack(fill="x", padx=12, pady=(2, 10))
+
+    def _code(self, command):
+        """Selectable, because these are meant to be copied."""
+        box = tk.Text(
+            self.body, height=1, wrap="word", bg=COLOR_ROW, fg=COLOR_TEXT,
+            insertbackground=COLOR_TEXT, relief="flat", padx=10, pady=8,
+            font=("TkFixedFont", 11), highlightthickness=0,
+        )
+        box.insert("1.0", command)
+        box.pack(fill="x", padx=14, pady=(2, 6))
+        box.update_idletasks()
+        # Grow to whatever the wrapped text needs; one line is rarely enough.
+        box.configure(height=int(box.count("1.0", "end", "displaylines")[0]), state="disabled")
+
+    def _link(self, label, url):
+        ctk.CTkButton(
+            self.body, text=label, command=lambda: webbrowser.open(url),
+            width=260, anchor="w",
+            fg_color=COLOR_ROW, hover_color=COLOR_SURFACE, text_color=COLOR_ORANGE,
+            border_width=1, border_color=COLOR_ORANGE,
+        ).pack(anchor="w", padx=14, pady=(2, 6))
