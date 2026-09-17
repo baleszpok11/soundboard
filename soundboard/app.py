@@ -127,6 +127,7 @@ class Soundboard(DeviceMixin, MicHotkeyMixin, SoundListMixin, DownloadMixin, Edi
             fg_color=COLOR_ORANGE, hover_color=COLOR_ORANGE_HOVER, text_color=COLOR_BG,
         )
         self._update_release = None
+        self._update_dialog = None
         self._start_update_check()
 
         board_tab = self.tabview.add("Soundboard")
@@ -178,7 +179,15 @@ class Soundboard(DeviceMixin, MicHotkeyMixin, SoundListMixin, DownloadMixin, Edi
         updater.clear_old_binary()
         if not self.config.get("check_for_updates", True):
             return
-        updater.check_async(lambda release: self.root.after(0, self._on_update_found, release))
+        updater.check_async(self._post_update_found)
+
+    def _post_update_found(self, release):
+        """Called on the check thread, where the window may already be
+        gone: quitting inside the check timeout destroys the root."""
+        try:
+            self.root.after(0, self._on_update_found, release)
+        except tk.TclError:
+            pass
 
     def _on_update_found(self, release):
         if release is None or release.version == self.config.get("skipped_version"):
@@ -188,12 +197,20 @@ class Soundboard(DeviceMixin, MicHotkeyMixin, SoundListMixin, DownloadMixin, Edi
         self.update_button.place(in_=self.tabview, relx=1.0, x=-46, y=6, anchor="ne")
 
     def open_update(self):
+        """One window, reused: a second dialog would download and install
+        alongside the first, both replacing the same file."""
         if self._update_release is None:
             return
-        return UpdateDialog(
+        if self._update_dialog is not None and self._update_dialog.winfo_exists():
+            self._update_dialog.deiconify()
+            self._update_dialog.lift()
+            self._update_dialog.focus_force()
+            return self._update_dialog
+        self._update_dialog = UpdateDialog(
             self.root, self._update_release, config=self.config,
             on_skip=self._on_update_skipped,
         )
+        return self._update_dialog
 
     def _on_update_skipped(self):
         save_config(self.config)
