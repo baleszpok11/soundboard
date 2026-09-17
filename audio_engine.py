@@ -269,6 +269,20 @@ class AudioEngine:
             self._active_sounds = [s for s in self._active_sounds if s.key != key]
             self._active_sounds_monitor = [s for s in self._active_sounds_monitor if s.key != key]
 
+    def active_keys(self):
+        """Every key currently playing, mapped to how far that clip has
+        got (0 to 1). One pass under the lock, so the board can poll all
+        its entries at once."""
+        progress = {}
+        with self._lock:
+            for sound in (*self._active_sounds, *self._active_sounds_monitor):
+                if sound.key is None or not len(sound.data):
+                    continue
+                fraction = min(1.0, sound.position / len(sound.data))
+                if fraction > progress.get(sound.key, -1.0):
+                    progress[sound.key] = fraction
+        return progress
+
     def playback_progress(self, key):
         """How far the clip playing under this key has got, 0 to 1, or None
         when nothing with that key is playing."""

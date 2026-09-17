@@ -33,6 +33,8 @@ from theme import (
     VOLUME_MAX,
 )
 
+PLAYING_POLL_MS = 100  # how often the board re-reads what the engine is playing
+
 
 class SoundListMixin:
     """The Soundboard tab's sound list and sound management. Expects
@@ -70,7 +72,39 @@ class SoundListMixin:
         self._grid_columns = 0
         self.list_frame.bind("<Configure>", self._on_list_resize)
         self._drag_from = None
+        self._playing_widgets = {}
         self._refresh_sound_list()
+        self._poll_playing()
+
+    @staticmethod
+    def _sound_key(sound):
+        """How the engine identifies clips from this entry's file."""
+        return os.path.abspath(resolve_sound_path(sound["path"]))
+
+    def stop_sound(self, sound):
+        self.audio_engine.stop_key(self._sound_key(sound))
+
+    def _poll_playing(self):
+        """Mirror what the engine is playing onto the board."""
+        playing = self.audio_engine.active_keys()
+        for entry in self._playing_widgets.values():
+            self._show_playing(entry, playing.get(entry["key"]))
+        self._playing_poll = self.root.after(PLAYING_POLL_MS, self._poll_playing)
+
+    @staticmethod
+    def _show_playing(entry, fraction):
+        progress, stop = entry["progress"], entry["stop"]
+        idle = progress.cget("fg_color")
+        if fraction is None:
+            progress.configure(progress_color=idle)
+            progress.set(0)
+            if stop is not None and stop.winfo_manager():
+                stop.pack_forget()
+            return
+        progress.configure(progress_color=COLOR_ORANGE)
+        progress.set(fraction)
+        if stop is not None and not stop.winfo_manager():
+            stop.pack(side="left", padx=3, before=entry["before"])
 
     def _on_search(self, _event=None):
         text = self.search_entry.get().strip().lower()
@@ -102,6 +136,7 @@ class SoundListMixin:
     def _refresh_sound_list(self):
         for widget in self.list_frame.winfo_children():
             widget.destroy()
+        self._playing_widgets = {}  # rebuilt below; the poll reads it
         visible = self._visible_sounds()
         if not visible:
             text = "No sounds match your search." if self.config["sounds"] else "No sounds yet. Click Add sound or use the Download tab."
@@ -126,23 +161,41 @@ class SoundListMixin:
             if len(textwrap.wrap(sound["name"], 20)) > 2:
                 lines[-1] = lines[-1][:17] + "..."
             lines.append("(file missing)" if missing else (sound.get("hotkey") or " "))
+            # A cell, not a bare button, so the tile can carry a progress
+            # bar under it the way list rows do.
+            cell = ctk.CTkFrame(self.list_frame, fg_color="transparent")
+            cell.grid(row=position // columns, column=position % columns, sticky="ew", padx=4, pady=4)
             button = ctk.CTkButton(
-                self.list_frame, text="\n".join(lines), height=84,
+                cell, text="\n".join(lines), height=84,
                 command=lambda s=sound: self.play_sound(s),
                 fg_color=COLOR_ORANGE if enabled and not missing else COLOR_ROW,
                 hover_color=COLOR_ORANGE_HOVER,
                 text_color=COLOR_BG if enabled and not missing else (COLOR_ERROR if missing else COLOR_TEXT_DIM),
             )
-            button.grid(row=position // columns, column=position % columns, sticky="ew", padx=4, pady=4)
+            button.pack(fill="x")
             menu = lambda e, i=idx: self._show_sound_menu(e, i, with_hotkey=True)
             button.bind("<Button-3>", menu)
             button.bind("<Button-2>" if sys.platform == "darwin" else "<Control-Button-1>", menu)
+            progress = ctk.CTkProgressBar(
+                cell, height=3, corner_radius=0, fg_color=COLOR_SURFACE, progress_color=COLOR_SURFACE,
+            )
+            progress.set(0)
+            progress.pack(fill="x", pady=(2, 0))
+            # Tiles are a single button, so stopping is done from the menu.
+            self._playing_widgets[idx] = {
+                "key": self._sound_key(sound), "progress": progress,
+                "stop": None, "before": None,
+            }
 
     def _build_sound_row(self, idx, sound):
         resolved_path = resolve_sound_path(sound["path"])
-        row = ctk.CTkFrame(self.list_frame, fg_color=COLOR_ROW, border_width=1, border_color=COLOR_ROW)
-        row.pack(fill="x", pady=3, padx=2)
-        row.sound_index = idx
+        # The outer frame carries the drag target and the progress bar; the
+        # inner one keeps the controls on a single line.
+        outer = ctk.CTkFrame(self.list_frame, fg_color=COLOR_ROW, border_width=1, border_color=COLOR_ROW)
+        outer.pack(fill="x", pady=3, padx=2)
+        outer.sound_index = idx
+        row = ctk.CTkFrame(outer, fg_color="transparent")
+        row.pack(fill="x")
 
         handle = ctk.CTkLabel(row, text="::", width=16, text_color=COLOR_TEXT_DIM, cursor="fleur")
         handle.pack(side="left", padx=(8, 0))
@@ -197,12 +250,20 @@ class SoundListMixin:
             command=lambda s=sound: self.play_sound(s),
             fg_color=COLOR_ORANGE, hover_color=COLOR_ORANGE_HOVER, text_color=COLOR_BG,
         ).pack(side="left", padx=3)
-        ctk.CTkButton(
+        # Built now, shown only while this sound is playing, so an idle
+        # board isn't a wall of dead buttons.
+        stop = ctk.CTkButton(
+            row, text="Stop", width=60,
+            command=lambda s=sound: self.stop_sound(s),
+            fg_color=COLOR_ERROR, hover_color="#cc4444", text_color=COLOR_BG,
+        )
+        hotkey_button = ctk.CTkButton(
             row, text="Hotkey", width=70,
             command=lambda i=idx: self.set_hotkey(i),
             fg_color=COLOR_ROW, hover_color=COLOR_SURFACE, text_color=COLOR_ORANGE,
             border_width=1, border_color=COLOR_ORANGE,
-        ).pack(side="left", padx=3)
+        )
+        hotkey_button.pack(side="left", padx=3)
         more = ctk.CTkButton(
             row, text="More", width=60,
             fg_color=COLOR_ROW, hover_color=COLOR_SURFACE, text_color=COLOR_ORANGE,
@@ -211,14 +272,29 @@ class SoundListMixin:
         more.configure(command=lambda i=idx, b=more: self._show_sound_menu(None, i, anchor=b))
         more.pack(side="left", padx=(3, 8))
 
+        progress = ctk.CTkProgressBar(
+            outer, height=3, corner_radius=0, fg_color=COLOR_ROW, progress_color=COLOR_ROW,
+        )
+        progress.set(0)
+        progress.pack(fill="x", padx=8, pady=(0, 4))
+        self._playing_widgets[idx] = {
+            "key": self._sound_key(sound), "progress": progress,
+            "stop": stop, "before": hotkey_button,
+        }
+
     def _show_sound_menu(self, event, index, anchor=None, with_hotkey=False):
         menu = tk.Menu(
             self.root, tearoff=0, bg=COLOR_ROW, fg=COLOR_TEXT,
             activebackground=COLOR_ORANGE, activeforeground=COLOR_BG,
         )
         count = len(self.config["sounds"])
+        sound = self.config["sounds"][index]
         if with_hotkey:
             menu.add_command(label="Set hotkey...", command=lambda: self.set_hotkey(index))
+        menu.add_command(
+            label="Stop", command=lambda: self.stop_sound(sound),
+            state="normal" if self._sound_key(sound) in self.audio_engine.active_keys() else "disabled",
+        )
         menu.add_command(label="Rename...", command=lambda: self.rename_sound(index))
         menu.add_command(label="Move up", command=lambda: self.move_sound(index, index - 1),
                          state="normal" if index > 0 else "disabled")
@@ -288,7 +364,7 @@ class SoundListMixin:
         if not sound["enabled"]:
             # Unchecking is the obvious "make this stop" gesture, so don't
             # leave a clip that's already playing running to the end.
-            self.audio_engine.stop_key(os.path.abspath(resolve_sound_path(sound["path"])))
+            self.audio_engine.stop_key(self._sound_key(sound))
         save_config(self.config)
         self._apply_hotkeys()
 
@@ -390,7 +466,7 @@ class SoundListMixin:
             if answer is None:
                 return
             delete_file = answer
-        self.audio_engine.stop_key(os.path.abspath(path))
+        self.audio_engine.stop_key(self._sound_key(sound))
         del self.config["sounds"][index]
         save_config(self.config)
         self._refresh_sound_list()
