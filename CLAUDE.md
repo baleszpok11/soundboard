@@ -59,6 +59,34 @@ virtual audio cable.
 - Open a PR into master with `Fixes #<number>` in the body, so merging
   closes the issue. Don't close issues by hand or push to master directly.
 - Squash-merge (`gh pr merge --squash`); the repo deletes the source branch
-  on merge. Merge only when the user says so.
+  on merge.
 - Releases: bump `APP_VERSION` in config.py, then tag master (`vX.Y.Z`)
   after merging; CI builds and publishes.
+
+## Merging without asking
+Merge your own PR without waiting, but only when every one of these holds:
+- It does what an issue asked for, or fixes a bug inside that scope.
+- Its behaviour was checked by running it, not by imports and pyflakes
+  alone: exercise the real code path, and prove a fix fails without it.
+- CI is green where CI runs at all (build.yml only runs on tags and
+  manual dispatch, so most PRs have no checks - absence of red is not
+  evidence).
+- A mistake can be undone by a later PR, without anyone losing data.
+
+Stop and ask when any of these is true, however small the diff looks:
+- It changes the config schema, or how existing config is read. Getting
+  this wrong empties someone's board with no error.
+- It touches packaging, the build workflow, or what a release publishes.
+  Those only misbehave at release time, long after merging.
+- It changes a default, removes behaviour, or alters what the app does to
+  files outside `Sounds/`.
+- It touches the relay, or anything near a token.
+- It couldn't be verified here. Tray, autostart and real audio devices
+  need Windows or macOS; say so rather than merging on a guess.
+- You had to choose between designs and weren't sure. Merging is not how
+  to settle that.
+
+Tagging and publishing releases stays the user's call, always.
+
+After a merge, say what went in and which of the rules above let it
+through.
