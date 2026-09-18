@@ -4,6 +4,7 @@ connected to the devices the user picked."""
 import sys
 import time
 import tkinter as tk
+import webbrowser
 from tkinter import messagebox
 
 import customtkinter as ctk
@@ -12,8 +13,10 @@ from .audio_engine import SAMPLE_RATE, sd, test_tone
 from .config import save_config
 from .theme import (
     CARD_BORDER,
+    COLOR_BG,
     COLOR_BORDER,
     COLOR_ERROR,
+    COLOR_ERROR_TEXT,
     COLOR_ON_ACCENT,
     COLOR_ORANGE,
     COLOR_ORANGE_HOVER,
@@ -42,6 +45,14 @@ MME_NAME_LENGTH = 31
 VIRTUAL_CABLE_HINTS = ("cable input", "blackhole", "vb-audio", "soundboard")
 # Inputs that carry what the PC plays rather than a real microphone.
 LOOPBACK_INPUT_HINTS = ("cable output", "blackhole", "stereo mix", "what u hear", "loopback", "wave out", "monitor of")
+# Where to get a virtual cable, for the platforms where one is installed
+# as a driver. Linux is left out on purpose: its cable is a PulseAudio
+# null sink, which PortAudio never lists by name, so a missing one can't
+# be told apart from a working one.
+CABLE_INSTALL = {
+    "win32": ("VB-CABLE", "https://vb-audio.com/Cable/"),
+    "darwin": ("BlackHole", "https://github.com/ExistentialAudio/BlackHole"),
+}
 
 
 class DeviceMixin:
@@ -119,6 +130,24 @@ class DeviceMixin:
             if n == name:
                 return i
         return None
+
+    def _missing_cable_install(self):
+        """(name, url) of the virtual cable to install when none of the
+        output devices looks like one, else None.
+
+        Without a cable the app still mixes and plays, so nothing looks
+        broken: the meters move and the test tone is audible. What is
+        missing is the one thing it is for - no other app can select the
+        mix as its microphone - so it is worth saying rather than leaving
+        someone to work out why nobody hears the clips.
+        """
+        install = CABLE_INSTALL.get(sys.platform)
+        if install is None:
+            return None
+        for index, name in self.output_devices:
+            if index is not None and any(hint in name.lower() for hint in VIRTUAL_CABLE_HINTS):
+                return None
+        return install
 
     # -- device selection UI -------------------------------------------------
 
@@ -201,6 +230,40 @@ class DeviceMixin:
         self._build_mic_controls(frame, 4)
         self._build_startup_controls(frame, 5)
         self._build_appearance_controls(frame, 6)
+
+    def _build_cable_warning(self, parent):
+        """Hidden until _update_device_warnings finds no virtual cable.
+        Its own row rather than a line in loop_warning, because the
+        useful part is the button that opens the installer page."""
+        self.cable_warning = ctk.CTkFrame(parent, fg_color=COLOR_BG)
+        self.cable_warning_label = ctk.CTkLabel(
+            self.cable_warning, text="", text_color=COLOR_ERROR_TEXT,
+            justify="left", anchor="w", wraplength=650,
+        )
+        self.cable_warning_label.pack(side="left", padx=(8, 8))
+        self.cable_warning_button = ctk.CTkButton(
+            self.cable_warning, text="", width=110,
+            fg_color=COLOR_ROW, hover_color=COLOR_ROW_HOVER, text_color=COLOR_TEXT,
+            border_width=1, border_color=COLOR_BORDER,
+        )
+        self.cable_warning_button.pack(side="left")
+
+    def _update_cable_warning(self, install):
+        frame = getattr(self, "cable_warning", None)
+        if frame is None:
+            return
+        if install is None:
+            frame.pack_forget()
+            return
+        name, url = install
+        self.cable_warning_label.configure(text=(
+            "No virtual audio cable is installed, so the mix stays on this computer: you "
+            f"hear the clips, Discord and games don't. Install {name}, then click Refresh "
+            "devices and pick it as the virtual mic output."
+        ))
+        self.cable_warning_button.configure(text=f"Get {name}", command=lambda: webbrowser.open(url))
+        if not frame.winfo_manager():
+            frame.pack(fill="x", padx=8, pady=(4, 0))
 
     # -- level meters ---------------------------------------------------
 
@@ -344,6 +407,7 @@ class DeviceMixin:
                     "themselves. Set your speakers/headphones as the default playback device, "
                     "and in Discord set Output Device to them too."
                 )
+        self._update_cable_warning(self._missing_cable_install())
         label = getattr(self, "loop_warning", None)
         if label is None:
             return

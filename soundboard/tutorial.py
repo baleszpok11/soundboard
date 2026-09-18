@@ -73,6 +73,11 @@ _CHECK = (
     "not, the output device is wrong."
 )
 
+_NO_CABLE = (
+    " Soundboard shows a warning on its own tab while no cable is "
+    "installed, with a button that opens this download page."
+)
+
 _FEEDBACK = (
     "If people say they hear themselves back, PC audio is getting into "
     "your virtual mic. Check three things: your system's default playback "
@@ -88,7 +93,7 @@ PAGES = {
          "VB-CABLE is the usual choice and is free. Download it, unzip it, "
          "right-click the setup for your system and choose Run as "
          "administrator, then reboot. VirtualAudioCable is an open-source "
-         "alternative if you prefer one."),
+         "alternative if you prefer one." + _NO_CABLE),
         ("link", "Open vb-audio.com/Cable", CABLE_URL),
         ("link", "Open VirtualAudioCable on GitHub", VAC_URL),
         ("step", "Point Soundboard at it",
@@ -112,7 +117,7 @@ PAGES = {
         ("text", _WHY),
         ("step", "Install BlackHole",
          "BlackHole is free and open-source. The 2-channel version is the "
-         "one you want. Install it and reboot."),
+         "one you want. Install it and reboot." + _NO_CABLE),
         ("link", "Open BlackHole on GitHub", BLACKHOLE_URL),
         ("step", "Point Soundboard at it",
          "On the Soundboard tab, set Microphone to your real microphone and "

@@ -108,6 +108,10 @@ open-source [VirtualAudioCable by frgnca](https://github.com/frgnca/VirtualAudio
 **macOS** — install [BlackHole](https://github.com/ExistentialAudio/BlackHole)
 (free, open-source).
 
+On Windows and macOS, Soundboard warns you on its own tab while no cable
+is installed, with a button that opens the download page: without one the
+mix stays on your computer — you hear the clips, Discord and games don't.
+
 **Windows and macOS:** pick your real microphone as the **input** device
 and the virtual cable as the **output** device in Soundboard, then select
 the virtual cable as your microphone in Discord/games.
@@ -188,6 +192,9 @@ yourself.
   A selected device that isn't connected is shown in red. If the virtual
   mic output disconnects while you're using it, the app tries to
   reconnect it for 2 minutes.
+  While no virtual cable is installed at all, a warning says so and
+  offers the download page for your platform; it goes away once the cable
+  is installed and the devices are refreshed.
 - **Hear soundboard:** when checked, clips also play on your system's
   default output (your speakers/headphones) so you know what's being
   triggered. Only clips are sent there, not your mic. If the virtual mic
