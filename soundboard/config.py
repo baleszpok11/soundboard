@@ -55,7 +55,7 @@ def _legacy_data_dir():
     return os.path.dirname(os.path.abspath(sys.executable))
 
 
-APP_VERSION = "0.10.0"  # bump before tagging a release; CI checks the tag matches
+APP_VERSION = "0.11.0"  # bump before tagging a release; CI checks the tag matches
 # What a freshly added sound is set to. Clips are usually mastered far
 # louder than a voice, so full volume is how people blow out a call the
 # first time they press a button; quiet is the recoverable mistake.
