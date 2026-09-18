@@ -148,7 +148,7 @@ class ShareMixin:
         return [self.profile]
 
     def _update_export_summary(self):
-        _data, skipped = board_file.build(self._export_profiles())
+        _data, skipped, partial = board_file.build(self._export_profiles())
         shareable = sum(len(p["sounds"]) for p in self._export_profiles()) - len(skipped)
         text = f"{shareable} sound(s) can be shared."
         color = COLOR_TEXT
@@ -158,11 +158,15 @@ class ShareMixin:
             text += (f"\n{len(skipped)} can't be, because they weren't downloaded from a link: "
                      f"{names}{more}.")
             color = COLOR_TEXT_DIM
+        if partial:
+            text += (f"\n{len(partial)} random group(s) travel as one clip: the rest were "
+                     "added from disk, so there's no link to rebuild them from.")
+            color = COLOR_TEXT_DIM
         self.export_summary.configure(text=text, text_color=color)
         self.export_button.configure(state="normal" if shareable else "disabled")
 
     def export_board(self):
-        data, skipped = board_file.build(self._export_profiles(), APP_VERSION)
+        data, skipped, _partial = board_file.build(self._export_profiles(), APP_VERSION)
         default = self.profile["name"] if self.export_scope.get() == ACTIVE_ONLY else "soundboard"
         path = filedialog.asksaveasfilename(
             title="Export board", defaultextension=BOARD_SUFFIX,

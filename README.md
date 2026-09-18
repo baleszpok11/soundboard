@@ -29,6 +29,8 @@ together, from one virtual microphone.
 - "Hear soundboard" toggle plays clips on your own speakers/headphones
   too — turning it off doesn't affect what others hear through the
   virtual cable
+- Random groups: give one entry several clips and each trigger plays a
+  different one, never the same one twice in a row
 - Re-triggering a sound that's still playing restarts it
 - Loop a sound so it keeps repeating, for music beds and ambience
 - See what's playing on the board, and stop a single sound without

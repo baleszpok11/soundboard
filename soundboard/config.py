@@ -204,7 +204,33 @@ def _load_sound(sound):
     sound.setdefault("enabled", True)
     sound.setdefault("loop", False)
     sound.setdefault("volume", 100)
+    _load_sound_group(sound)
     return sound
+
+
+def _load_sound_group(sound):
+    """Keep "paths" a list of at least two clips led by "path", or drop
+    it. An entry always plays "path" on its own, so a board written by a
+    newer version still works in an older one."""
+    paths = sound.get("paths")
+    if not isinstance(paths, list):
+        sound.pop("paths", None)
+        return
+    members = [p for p in paths if isinstance(p, str) and p]
+    members = list(dict.fromkeys([sound["path"], *members]))
+    if len(members) > 1:
+        sound["paths"] = members
+    else:
+        sound.pop("paths", None)
+
+
+def sound_paths(sound):
+    """Every clip a board entry can play: one for a plain sound, several
+    for a random group."""
+    paths = sound.get("paths")
+    if isinstance(paths, list) and len(paths) > 1:
+        return list(paths)
+    return [sound["path"]]
 
 
 def unique_profile_name(name, taken):
