@@ -84,6 +84,14 @@ virtual audio cable.
   the .app is ad-hoc signed and a swapped-in copy can be quarantined out
   of launching. APP_VERSION and the release tag must agree or the
   comparison is meaningless, so CI fails a tag build when they do not
+- Windows windows: win_window.py patches two CustomTkinter behaviours
+  before the first window exists - it replaces every window's icon 200 ms
+  after creation unless iconbitmap() was called (iconphoto, what Linux
+  and macOS use, doesn't count, which is why assets/icon.ico ships as
+  data too), and its DPI rescale fails to block the resize events it
+  causes itself, so a window moved between monitors of different DPI is
+  resized from a size that belonged to the other screen. A fit to the
+  current monitor's work area runs after the move as a backstop
 - Errors: Tk callback errors and startup failures show a dialog and append
   to soundboard_error.log; config writes are atomic
 - Sharing: board_file.py reads/writes .sbboard files (links, not audio);

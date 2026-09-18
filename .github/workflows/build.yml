@@ -58,7 +58,9 @@ jobs:
         if: runner.os == 'Windows'
         # pynput imports its backend by name at runtime, so PyInstaller never
         # sees it; name it here or the build dies on the first hotkey.
-        run: pyinstaller --onefile --windowed --icon assets/icon.ico --add-data "assets/icon.png;assets" --add-data "assets/tutorial;assets/tutorial" --collect-data customtkinter --hidden-import PIL._tkinter_finder --collect-all yt_dlp --collect-all imageio_ffmpeg --collect-all pystray --name soundboard --hidden-import pynput.keyboard._win32 --hidden-import pynput.mouse._win32 main.py
+        # icon.ico travels as data as well as being the exe's icon: the
+        # windows themselves are given it at runtime with iconbitmap().
+        run: pyinstaller --onefile --windowed --icon assets/icon.ico --add-data "assets/icon.png;assets" --add-data "assets/icon.ico;assets" --add-data "assets/tutorial;assets/tutorial" --collect-data customtkinter --hidden-import PIL._tkinter_finder --collect-all yt_dlp --collect-all imageio_ffmpeg --collect-all pystray --name soundboard --hidden-import pynput.keyboard._win32 --hidden-import pynput.mouse._win32 main.py
 
       - name: Build executable (macOS)
         if: runner.os == 'macOS'

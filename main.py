@@ -20,8 +20,14 @@ import customtkinter as ctk
 
 from soundboard.app import Soundboard
 from soundboard.audio_engine import PORTAUDIO_ERROR, sd
-from soundboard.config import ICON_PATH, write_error_log
+from soundboard.config import ICON_ICO_PATH, ICON_PATH, write_error_log
 from soundboard.dialogs import handle_exception, show_error
+from soundboard.win_window import (
+    fit_to_monitor_on_move,
+    fix_dpi_rescaling,
+    is_windows,
+    use_app_icon,
+)
 
 
 def _show_startup_error(root):
@@ -67,6 +73,10 @@ def main():
                 "Fedora: sudo dnf install portaudio\n"
                 "Arch: sudo pacman -S portaudio"
             )
+        # Both of these patch CustomTkinter's window classes, so they
+        # have to be in place before the first window is built.
+        use_app_icon()
+        fix_dpi_rescaling()
         # The look is set in Soundboard.__init__, once the config has been
         # read: the appearance mode is a setting, and the platform tokens
         # need a window before they can ask Tk which fonts exist.
@@ -76,9 +86,13 @@ def main():
         root.geometry("900x700")
         root.minsize(640, 480)
         try:
-            root.iconphoto(True, tk.PhotoImage(file=ICON_PATH))
+            if is_windows():
+                root.iconbitmap(ICON_ICO_PATH)
+            else:
+                root.iconphoto(True, tk.PhotoImage(file=ICON_PATH))
         except tk.TclError:
             pass
+        fit_to_monitor_on_move(root)
         board = Soundboard(root)
         if "--hidden" in sys.argv:
             board.hide_to_tray()  # started by the launch-at-login entry
