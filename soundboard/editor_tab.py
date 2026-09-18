@@ -2,8 +2,9 @@
 
 import os
 import tkinter as tk
-from tkinter import filedialog, messagebox
+from tkinter import filedialog
 
+from .dialogs import error, info
 import customtkinter as ctk
 import numpy as np
 import soundfile as sf
@@ -384,7 +385,7 @@ class EditorMixin:
             if len(data) == 0:
                 raise ValueError("The file contains no audio.")
         except Exception as e:
-            messagebox.showerror("Could not load sound", str(e))
+            error(self.root, "Could not load sound", str(e))
             self.editor_sound_var.set(self._editor_label if self.editor_data is not None else EDITOR_PLACEHOLDER)
             return
         self._editor_label = label
@@ -790,7 +791,7 @@ class EditorMixin:
             processed = self._get_editor_processed_data()
             self.audio_engine.play_data(processed, self.editor_samplerate, key=EDITOR_PREVIEW_KEY)
         except Exception as e:
-            messagebox.showerror("Preview error", str(e))
+            error(self.root, "Preview error", str(e))
             return
         self._track_playhead()
 
@@ -831,7 +832,7 @@ class EditorMixin:
             processed = self._get_editor_processed_data()
             sf.write(dest, processed, self.editor_samplerate)
         except Exception as e:
-            messagebox.showerror("Save error", str(e))
+            error(self.root, "Save error", str(e))
             return
         self._add_sound_entry(name, os.path.basename(dest))
-        messagebox.showinfo("Saved", f"Saved and added to your board as '{name}'.")
+        info(self.root, "Saved", f"Saved and added to your board as '{name}'.")

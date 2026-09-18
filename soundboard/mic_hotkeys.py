@@ -2,13 +2,12 @@
 registers global hotkeys."""
 
 import subprocess
-from tkinter import messagebox
 
 import customtkinter as ctk
 
 from .audio_engine import MIC_EFFECTS
 from .config import save_config
-from .dialogs import HotkeyDialog
+from .dialogs import HotkeyDialog, error, warn
 from .hotkeys import (
     MACOS_INPUT_MONITORING_URL,
     HotkeyListener,
@@ -227,14 +226,14 @@ class MicHotkeyMixin:
         if not hotkey:
             return ""
         if not is_valid_hotkey(hotkey):
-            messagebox.showerror(
+            error(self.root, 
                 "Invalid hotkey",
                 f"'{hotkey}' is not a valid hotkey. Use a format like <ctrl>+<alt>+1.",
             )
             return None
         other = self._hotkey_owner(hotkey, skip=owner)
         if other is not None:
-            messagebox.showerror("Hotkey in use", f"'{hotkey}' is already used by {other}.")
+            error(self.root, "Hotkey in use", f"'{hotkey}' is already used by {other}.")
             return None
         return hotkey
 
@@ -282,7 +281,7 @@ class MicHotkeyMixin:
                 self.hotkey_listener = HotkeyListener(mapping, ptt_hotkey, self._on_ptt_hold)
                 self.hotkey_listener.start()
             except Exception as e:
-                messagebox.showwarning("Hotkey error", f"Could not register hotkeys: {e}")
+                warn(self.root, "Hotkey error", f"Could not register hotkeys: {e}")
         if hasattr(self, "mic_status"):
             self._update_mic_state()
         if hasattr(self, "permission_warning"):

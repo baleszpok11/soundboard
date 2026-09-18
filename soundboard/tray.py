@@ -3,8 +3,8 @@ window closed."""
 
 import sys
 import threading
-from tkinter import messagebox
 
+from .dialogs import ask_yes_no, error, warn
 import customtkinter as ctk
 
 from . import autostart
@@ -59,7 +59,7 @@ class TrayMixin:
         try:
             autostart.set_enabled(bool(self.autostart_checkbox.get()))
         except OSError as e:
-            messagebox.showerror("Startup setting", f"Could not change the startup setting: {e}")
+            error(self.root, "Startup setting", f"Could not change the startup setting: {e}")
             self._refresh_autostart_checkbox()
 
     def _on_toggle_tray(self):
@@ -72,12 +72,12 @@ class TrayMixin:
         self.config["close_to_tray"] = enabled
         save_config(self.config)
 
-    @staticmethod
-    def _confirm_tray():
+    def _confirm_tray(self):
         """Desktops without a tray (GNOME without an extension, say) take
         the icon and show nothing, so ask instead of hiding the window
         somewhere the user can't get it back from."""
-        return messagebox.askyesno(
+        return ask_yes_no(
+            self.root,
             "Keep running in the tray",
             "Soundboard put an icon in your tray or menu bar.\n\n"
             "Can you see it? If you can't, leave this off: closing the window "
@@ -111,7 +111,7 @@ class TrayMixin:
             else:
                 threading.Thread(target=icon.run, daemon=True).start()
         except Exception as e:
-            messagebox.showwarning(
+            warn(self.root, 
                 "Tray unavailable",
                 f"Soundboard could not add itself to the tray: {e}\n\n"
                 "Closing the window will quit as usual.",

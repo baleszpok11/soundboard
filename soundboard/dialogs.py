@@ -1,5 +1,12 @@
 """Small modal dialogs: a one-line text prompt, the hotkey recorder, the
-error dialog and the bug report window."""
+error dialog and the bug report window, plus the placement every popup
+in the app goes through.
+
+A popup with no parent is placed by Tk on the primary monitor, which on
+a multi-monitor desk puts the app on one screen and its messages on
+another. Everything here opens over the window it came from: our own
+dialogs are centred by hand, and native message boxes are handed a
+parent, which is what Tk centres them on."""
 
 import os
 import shutil
@@ -8,6 +15,7 @@ import threading
 import tkinter as tk
 import traceback
 import webbrowser
+from tkinter import messagebox
 
 import customtkinter as ctk
 
@@ -31,6 +39,54 @@ from .theme import (
     font,
     register_tk,
 )
+
+
+def center_on_parent(window, parent):
+    """Put a dialog over the middle of the window that opened it, a
+    little above centre so it doesn't cover what it is asking about.
+    Called after the dialog's widgets exist, so it knows its own size."""
+    try:
+        window.update_idletasks()
+        width = window.winfo_width() or window.winfo_reqwidth()
+        height = window.winfo_height() or window.winfo_reqheight()
+        x = parent.winfo_rootx() + (parent.winfo_width() - width) // 2
+        y = parent.winfo_rooty() + (parent.winfo_height() - height) // 3
+        # wm_geometry, not geometry: these are real pixels on whichever
+        # monitor the parent is on, not numbers waiting to be scaled.
+        window.wm_geometry(f"+{max(x, 0)}+{max(y, 0)}")
+    except tk.TclError:
+        pass  # the parent went away; where the dialog lands is the least of it
+
+
+def _parent(window):
+    """Tk centres a message box on its parent, and refuses a parent that
+    has been destroyed, which happens while the app is shutting down."""
+    try:
+        if window is not None and window.winfo_exists():
+            return {"parent": window}
+    except tk.TclError:
+        pass
+    return {}
+
+
+def info(window, title, message):
+    return messagebox.showinfo(title, message, **_parent(window))
+
+
+def warn(window, title, message):
+    return messagebox.showwarning(title, message, **_parent(window))
+
+
+def error(window, title, message):
+    return messagebox.showerror(title, message, **_parent(window))
+
+
+def ask_yes_no(window, title, message):
+    return messagebox.askyesno(title, message, **_parent(window))
+
+
+def ask_yes_no_cancel(window, title, message):
+    return messagebox.askyesnocancel(title, message, **_parent(window))
 
 
 class TextDialog(ctk.CTkToplevel):
@@ -64,6 +120,7 @@ class TextDialog(ctk.CTkToplevel):
         self.entry.bind("<Return>", lambda e: self._ok())
         self.bind("<Escape>", lambda e: self.destroy())
         self.transient(parent)
+        center_on_parent(self, parent)
         self.after(50, self._focus)
 
     def _focus(self):
@@ -126,6 +183,7 @@ class VolumeDialog(ctk.CTkToplevel):
 
         self.bind("<Escape>", lambda e: self.destroy())
         self.transient(parent)
+        center_on_parent(self, parent)
         self.after(50, self._focus)
 
     def _focus(self):
@@ -188,6 +246,7 @@ class HotkeyDialog(ctk.CTkToplevel):
         self.entry.bind("<Return>", lambda e: self._save())
         self.protocol("WM_DELETE_WINDOW", self.destroy)
         self.transient(parent)
+        center_on_parent(self, parent)
         self.after(50, self._start_recording)
 
     def _start_recording(self):
@@ -296,6 +355,7 @@ class ErrorDialog(ctk.CTkToplevel):
             fg_color=COLOR_ORANGE, hover_color=COLOR_ORANGE_HOVER, text_color=COLOR_ON_ACCENT,
         ).pack(side="right", padx=(0, 6))
         self.transient(parent)
+        center_on_parent(self, parent)
         self.after(50, self._focus)
 
     def _focus(self):
@@ -395,6 +455,7 @@ class ReportDialog(ctk.CTkToplevel):
 
         self._refresh_preview()
         self.transient(parent)
+        center_on_parent(self, parent)
         self.after(50, self._focus)
 
     def _focus(self):
@@ -550,6 +611,7 @@ class UpdateDialog(ctk.CTkToplevel):
 
         self.protocol("WM_DELETE_WINDOW", self._close)
         self.transient(parent)
+        center_on_parent(self, parent)
 
     def _action_text(self):
         return "Download and install" if updater.can_self_update() else "Download"
