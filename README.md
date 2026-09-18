@@ -54,6 +54,10 @@ together, from one virtual microphone.
   density and corner radius of macOS on a Mac and of Fluent on Windows,
   in light or dark, following the desktop's own setting unless you pick
   one under **Appearance**
+- **Record** button: capture a clip straight from your microphone into
+  the board, without leaving the app
+- Add sounds in bulk: pick several files at once, or point it at a
+  folder and take every clip in it
 - All sounds live in one `Sounds/` folder
 - Settings persist automatically between runs
 - Runs from source (Python) or as a standalone executable — no Python

@@ -7,11 +7,14 @@ import random
 import shutil
 import sys
 import textwrap
+import time
 import tkinter as tk
 from tkinter import filedialog, messagebox
 
 import customtkinter as ctk
+import soundfile as sf
 
+from .audio_engine import RECORD_MAX_S, SAMPLE_RATE
 from .config import (
     NEW_SOUND_VOLUME,
     SOUNDS_DIR,
@@ -49,6 +52,15 @@ from .theme import (
 )
 
 PLAYING_POLL_MS = 100  # how often the board re-reads what the engine is playing
+RECORD_POLL_MS = 200  # how often the Record button's elapsed time is redrawn
+AUDIO_EXTENSIONS = (".wav", ".flac", ".ogg", ".mp3")
+IMPORT_REPORT_NAMES = 10  # names listed before the rest are counted
+
+
+def _name_list(names):
+    shown = "\n".join(names[:IMPORT_REPORT_NAMES])
+    rest = len(names) - IMPORT_REPORT_NAMES
+    return f"{shown}\nand {rest} more" if rest > 0 else shown
 
 
 class SoundListMixin:
@@ -586,6 +598,17 @@ class SoundListMixin:
             fg_color=COLOR_ORANGE, hover_color=COLOR_ORANGE_HOVER, text_color=COLOR_ON_ACCENT,
         ).pack(side="left")
         ctk.CTkButton(
+            frame, text="Add folder", command=self.add_folder,
+            fg_color=COLOR_ROW, hover_color=COLOR_ROW_HOVER, text_color=COLOR_TEXT,
+            border_width=1, border_color=COLOR_BORDER,
+        ).pack(side="left", padx=(8, 0))
+        self.record_button = ctk.CTkButton(
+            frame, text="Record", width=90, command=self.toggle_record,
+            fg_color=COLOR_ROW, hover_color=COLOR_ROW_HOVER, text_color=COLOR_TEXT,
+            border_width=1, border_color=COLOR_BORDER,
+        )
+        self.record_button.pack(side="left", padx=(8, 0))
+        ctk.CTkButton(
             frame, text="Stop all", command=self.audio_engine.stop_all,
             fg_color=COLOR_ERROR, hover_color=COLOR_ERROR_HOVER, text_color=COLOR_ON_ERROR,
         ).pack(side="left", padx=(8, 0))
@@ -624,19 +647,133 @@ class SoundListMixin:
         return os.path.basename(dest)
 
     def add_sound(self):
-        path = filedialog.askopenfilename(
-            title="Choose audio file",
+        paths = filedialog.askopenfilenames(
+            title="Choose audio files",
             filetypes=[("Audio files", "*.wav *.flac *.ogg *.mp3"), ("All files", "*.*")],
         )
-        if not path:
+        if paths:
+            self._add_sound_files(paths)
+
+    def add_folder(self):
+        folder = filedialog.askdirectory(title="Choose a folder of sounds")
+        if not folder:
             return
-        stored_path = self._import_into_sounds_dir(path)
-        existing = self._find_sound(resolve_sound_path(stored_path))
-        if existing is not None:
-            messagebox.showinfo("Already added", f"This file is already on your board as '{existing['name']}'.")
+        try:
+            names = sorted(os.listdir(folder), key=str.lower)
+        except OSError as e:
+            messagebox.showerror("Could not read folder", str(e))
             return
-        name = os.path.splitext(os.path.basename(path))[0]
-        self._add_sound_entry(name, stored_path)
+        # Files only: a folder of albums would otherwise pull in a board
+        # nobody asked for.
+        paths = [os.path.join(folder, name) for name in names
+                 if os.path.splitext(name)[1].lower() in AUDIO_EXTENSIONS
+                 and os.path.isfile(os.path.join(folder, name))]
+        if not paths:
+            messagebox.showinfo("Nothing to add", "That folder has no wav, flac, ogg or mp3 files in it.")
+            return
+        self._add_sound_files(paths)
+
+    def _add_sound_files(self, paths):
+        """Import several files as board entries, writing the config and
+        redrawing the list once at the end rather than per file, and
+        telling the user what didn't make it instead of stopping."""
+        added, skipped, failed = 0, [], []
+        for path in paths:
+            try:
+                stored_path = self._import_into_sounds_dir(path)
+            except OSError as e:
+                failed.append(f"{os.path.basename(path)}: {e}")
+                continue
+            if self._find_sound(resolve_sound_path(stored_path)) is not None:
+                skipped.append(os.path.basename(path))
+                continue
+            self.sounds.append(self._new_sound_entry(
+                os.path.splitext(os.path.basename(path))[0], stored_path))
+            added += 1
+        if added:
+            save_config(self.config)
+            self._refresh_sound_list()
+        self._report_import(added, skipped, failed)
+
+    @staticmethod
+    def _report_import(added, skipped, failed):
+        if not skipped and not failed:
+            return  # the new rows are the confirmation
+        lines = [f"Added {added} sound{'s' if added != 1 else ''}."]
+        if skipped:
+            lines.append(f"\nAlready on the board ({len(skipped)}):\n" + _name_list(skipped))
+        if failed:
+            lines.append(f"\nCouldn't be added ({len(failed)}):\n" + _name_list(failed))
+        show = messagebox.showinfo if not failed else messagebox.showwarning
+        show("Add sounds", "\n".join(lines))
+
+    # -- recording ----------------------------------------------------------
+
+    def toggle_record(self):
+        """Record the microphone straight into the board. What is captured
+        is the mic alone, before mute and push-to-talk, so a muted mic
+        still records and the soundboard's own clips stay out of it."""
+        if self.audio_engine.recording_seconds() is not None:
+            self._finish_recording()
+            return
+        if not self.audio_engine.start_recording():
+            messagebox.showinfo(
+                "No microphone",
+                "Choose an input device above and wait for it to start "
+                "before recording.",
+            )
+            return
+        self._update_record_button()
+        self._poll_recording()
+
+    def _poll_recording(self):
+        seconds = self.audio_engine.recording_seconds()
+        if seconds is None:
+            return  # stopped from elsewhere
+        if seconds >= RECORD_MAX_S:
+            self._finish_recording(capped=True)
+            return
+        self._update_record_button(seconds)
+        self.root.after(RECORD_POLL_MS, self._poll_recording)
+
+    def _update_record_button(self, seconds=0.0):
+        if self.audio_engine.recording_seconds() is None:
+            self.record_button.configure(
+                text="Record", fg_color=COLOR_ROW, hover_color=COLOR_ROW_HOVER,
+                text_color=COLOR_TEXT, border_width=1,
+            )
+            return
+        self.record_button.configure(
+            text=f"Stop {int(seconds) // 60}:{int(seconds) % 60:02d}",
+            fg_color=COLOR_ERROR, hover_color=COLOR_ERROR_HOVER,
+            text_color=COLOR_ON_ERROR, border_width=0,
+        )
+
+    def _finish_recording(self, capped=False):
+        data = self.audio_engine.stop_recording()
+        self._update_record_button()
+        if data is None:
+            messagebox.showinfo(
+                "Nothing recorded",
+                "The recording was too short to keep. Check that the input "
+                "device is the microphone you are speaking into.",
+            )
+            return
+        name = time.strftime("Recording %Y-%m-%d %H.%M.%S")
+        try:
+            ensure_sounds_dir()
+            dest = unique_path(os.path.join(SOUNDS_DIR, sanitize_filename(name + ".wav")))
+            sf.write(dest, data, SAMPLE_RATE)
+        except OSError as e:
+            messagebox.showerror("Could not save recording", str(e))
+            return
+        self._add_sound_entry(name, os.path.basename(dest))
+        if capped:
+            messagebox.showinfo(
+                "Recording stopped",
+                f"Recordings stop after {RECORD_MAX_S // 60} minutes. "
+                f"'{name}' was added to your board.",
+            )
 
     def add_clips_to_group(self, index):
         """Turn an entry into a random group, or add to one. Triggering it
@@ -692,7 +829,8 @@ class SoundListMixin:
                 return sound
         return None
 
-    def _add_sound_entry(self, name, stored_path, source=None):
+    @staticmethod
+    def _new_sound_entry(name, stored_path, source=None):
         """`source` is where a downloaded clip came from, so the board can
         be shared as links rather than audio. Files picked from disk and
         clips saved by the editor have none, and aren't shareable."""
@@ -700,7 +838,10 @@ class SoundListMixin:
                  "volume": NEW_SOUND_VOLUME, "loop": False}
         if source is not None:
             entry["source"] = source
-        self.sounds.append(entry)
+        return entry
+
+    def _add_sound_entry(self, name, stored_path, source=None):
+        self.sounds.append(self._new_sound_entry(name, stored_path, source))
         save_config(self.config)
         self._refresh_sound_list()
 
