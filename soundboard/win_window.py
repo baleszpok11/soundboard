@@ -28,6 +28,9 @@ from .config import ICON_ICO_PATH
 # puts the real ones back a second later; fitting the window to its
 # monitor before that would be undone.
 FIT_DELAY_MS = 1200
+# The rescale between block and unblock is synchronous, so this only
+# ever fires when something went wrong in the middle of it.
+UNBLOCK_SAFETY_MS = 1000
 _WINDOW_CLASSES = (ctk.CTk, ctk.CTkToplevel)
 
 
@@ -60,9 +63,20 @@ def fix_dpi_rescaling():
 
     def block(window):
         window._block_update_dimensions_event = True
+        # CustomTkinter sets this flag, rescales, and clears it with
+        # nothing in between to survive an error - a widget destroyed
+        # mid-rescale is enough. A flag left set stops the window
+        # tracking its own size for good, so clear it either way.
+        try:
+            window.after(UNBLOCK_SAFETY_MS, lambda: unblock(window))
+        except Exception:
+            pass
 
     def unblock(window):
-        window._block_update_dimensions_event = False
+        try:
+            window._block_update_dimensions_event = False
+        except Exception:
+            pass
 
     for cls in _WINDOW_CLASSES:
         cls.block_update_dimensions_event = block
