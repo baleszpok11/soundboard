@@ -101,6 +101,14 @@ virtual audio cable.
   never spoken. A machine with no engine (a bare Linux without eSpeak)
   is normal - the tab says so instead of failing at the button. Like
   pynput, the driver is a runtime import, so each build names its own
+- Ducking: _Ducker in audio_engine.py drops the mic while anything is in
+  _active_sounds, applied in _on_output only - the monitor callback
+  carries clips alone, so what reaches the cable ducks and what you hear
+  locally does not. Attack and release differ on purpose (fast enough to
+  beat the clip, slow enough not to pump), and the gain is ramped across
+  each block from the previous block's value, so the seams are continuous
+  and there is nothing to click. config "duck_amount" is in dB; the top
+  of the range is a real mute rather than the 1% a literal -40 dB leaves
 - Loudness: dsp.measure_loudness() is EBU R128 (K-weighting, 400 ms
   blocks, both gates), built from the spec's parameters rather than its
   48 kHz coefficient table so a clip measures the same at any rate. A

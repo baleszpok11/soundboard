@@ -26,6 +26,13 @@ MIC_MAX_FRAMES = SAMPLE_RATE // 2  # drop older mic audio beyond 500 ms
 CLIP_CACHE_BYTES = 512 * 1024 * 1024  # decoded clips kept in memory
 LIMITER_CEILING = 0.89  # about -1 dBFS
 LIMITER_RELEASE_S = 0.3
+# Ducking the mic under a clip. Down fast enough that the voice is out of
+# the way before the clip is audible, back up slowly enough that a board
+# full of short clips does not pump the voice in and out.
+DUCK_ATTACK_S = 0.06
+DUCK_RELEASE_S = 0.35
+DUCK_MIN_DB = 3
+DUCK_MUTE_DB = 40  # the top of the control is a real mute, not 40 dB down
 STREAM_TIMEOUT_S = 2.0  # a running stream with no callbacks for this long is treated as lost
 # Live mic effects. Only what can be done a block at a time belongs here;
 # anything that needs the whole clip stays in dsp.py and the editor.
@@ -42,6 +49,16 @@ TEST_TONE_S = 0.8
 TEST_TONE_HZ = 440.0
 TEST_TONE_LEVEL = 0.4
 TEST_TONE_FADE_S = 0.05
+
+
+def duck_depth(amount_db):
+    """How far down the mic goes for a setting in dB. The top of the
+    range silences it outright rather than leaving the 1% a literal
+    -40 dB would: that end of the control is Soundpad's "block voice",
+    and it should mean what it says."""
+    if amount_db >= DUCK_MUTE_DB:
+        return 1.0
+    return 1.0 - 10 ** (-amount_db / 20)
 
 
 def _resample(data, orig_sr, target_sr):
@@ -134,6 +151,35 @@ class _Limiter:
             block *= np.linspace(self.gain, new_gain, len(block), dtype=np.float32)[:, None]
             self.gain = new_gain
         np.clip(block, -1.0, 1.0, out=block)
+        return block
+
+
+class _Ducker:
+    """Pulls the microphone down while a clip is playing and lets it back
+    up once nothing is. Block-based like the limiter, and asymmetric for
+    the same reason it is: the attack has to beat the clip it is making
+    room for, while the release is what stops the voice pumping.
+
+    `depth` is how far down the mic goes, 0 for off and 1 for silent, so
+    Soundpad's "block voice" is just the top of the one control."""
+
+    def __init__(self):
+        self.depth = 0.0
+        self.gain = 1.0
+        blocks_per_second = SAMPLE_RATE / BLOCK_SIZE
+        self._attack = 1.0 - np.exp(-1.0 / (DUCK_ATTACK_S * blocks_per_second))
+        self._release = 1.0 - np.exp(-1.0 / (DUCK_RELEASE_S * blocks_per_second))
+
+    def process(self, block, ducking):
+        target = 1.0 - self.depth if ducking else 1.0
+        if target == 1.0 and self.gain == 1.0:
+            return block  # switched off, or already all the way back up
+        rate = self._attack if target < self.gain else self._release
+        new_gain = self.gain + (target - self.gain) * rate
+        # Ramp across the block rather than stepping at its edge, which
+        # is the same thing the mic mute and the limiter do.
+        block *= np.linspace(self.gain, new_gain, len(block), dtype=np.float32)[:, None]
+        self.gain = new_gain
         return block
 
 
@@ -264,6 +310,7 @@ class AudioEngine:
         self._mic_level = 1.0  # gain applied to the last block, for smooth changes
         self.sound_gain = 1.0
         self.mic_effects = _MicEffectChain()
+        self._ducker = _Ducker()
         self._output_limiter = _Limiter()
         self._monitor_limiter = _Limiter()
         self.on_error = None
@@ -481,6 +528,13 @@ class AudioEngine:
         data = np.concatenate(parts)
         return data if len(data) >= RECORD_MIN_S * SAMPLE_RATE else None
 
+    def set_duck(self, depth):
+        """How far the mic drops under a playing clip: 0 for off, 1 to
+        silence it. Taken under the lock so the callback never reads a
+        half-written change."""
+        with self._lock:
+            self._ducker.depth = min(1.0, max(0.0, depth))
+
     def set_monitor_muted(self, muted):
         with self._lock:
             self.monitor_muted = muted
@@ -526,7 +580,16 @@ class AudioEngine:
                 self._mic_level = target
             else:
                 mixed *= target
-            mixed += self._mix_sounds("_active_sounds", frames, self.output_channels)
+            # Before _mix_sounds, which drops the clips that end in this
+            # block: what matters is whether one is playing into it.
+            playing = bool(self._active_sounds)
+            sounds = self._mix_sounds("_active_sounds", frames, self.output_channels)
+            # Only the mic is ducked, and only here. The monitor callback
+            # carries clips alone, so what you hear locally is untouched
+            # and the duck reaches the cable, which is where the voice and
+            # the clip are actually competing.
+            mixed = self._ducker.process(mixed, playing)
+            mixed += sounds
         outdata[:] = self._output_limiter.process(mixed)
         self.output_peak = self._output_limiter.peak
 

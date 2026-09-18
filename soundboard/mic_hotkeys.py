@@ -5,7 +5,7 @@ import subprocess
 
 import customtkinter as ctk
 
-from .audio_engine import MIC_EFFECTS, REPLAY_S
+from .audio_engine import DUCK_MIN_DB, DUCK_MUTE_DB, MIC_EFFECTS, REPLAY_S, duck_depth
 from .config import save_config
 from .dialogs import HotkeyDialog, ask_yes_no, error, warn
 from .hotkeys import (
@@ -88,8 +88,25 @@ class MicHotkeyMixin:
             font=font("small"), text_color=COLOR_TEXT_DIM,
         )
         self.mic_effect_label.pack(side="left")
+        duck = ctk.CTkFrame(box, fg_color="transparent")
+        duck.grid(row=4, column=0, columnspan=2, sticky="w", pady=(6, 0))
+        self.duck_checkbox = ctk.CTkCheckBox(
+            duck, text="Duck under clips", command=self._on_toggle_duck, **checkbox)
+        if self.config.get("duck_mic"):
+            self.duck_checkbox.select()
+        self.duck_checkbox.pack(side="left")
+        self.duck_slider = ctk.CTkSlider(
+            duck, from_=DUCK_MIN_DB, to=DUCK_MUTE_DB, width=120,
+            number_of_steps=DUCK_MUTE_DB - DUCK_MIN_DB,
+            command=self._on_duck_amount,
+        )
+        self.duck_slider.set(self.config.get("duck_amount", 12))
+        self.duck_slider.pack(side="left", padx=(8, 0))
+        self.duck_label = ctk.CTkLabel(
+            duck, text="", width=52, font=font("small"), text_color=COLOR_TEXT_DIM)
+        self.duck_label.pack(side="left")
         self.mic_status = ctk.CTkLabel(box, text="", text_color=COLOR_TEXT_DIM, anchor="w")
-        self.mic_status.grid(row=4, column=0, columnspan=2, sticky="w", pady=(4, 0))
+        self.mic_status.grid(row=5, column=0, columnspan=2, sticky="w", pady=(4, 0))
         if self.config["mic_muted"]:
             self.mute_checkbox.select()
         if self.config["push_to_talk"]:
@@ -99,6 +116,7 @@ class MicHotkeyMixin:
         self._update_mic_state()
         self._apply_mic_effect()
         self._apply_replay_setting()
+        self._apply_duck()
 
     @staticmethod
     def _mic_effect_label(name):
@@ -122,6 +140,25 @@ class MicHotkeyMixin:
         self.audio_engine.set_mic_effect(
             self.config["mic_effect"], self.config["mic_effect_amount"] / 100,
         )
+
+    def _on_toggle_duck(self):
+        self.config["duck_mic"] = bool(self.duck_checkbox.get())
+        save_config(self.config)
+        self._apply_duck()
+
+    def _on_duck_amount(self, value):
+        self.config["duck_amount"] = int(round(value))
+        self._apply_duck()
+        self._save_config_soon()
+
+    def _apply_duck(self):
+        """Depth of 0 switches the ducker off entirely, so the callback
+        leaves the mic block alone when this is unchecked."""
+        amount = self.config.get("duck_amount", 12)
+        self.duck_label.configure(
+            text="Mute" if amount >= DUCK_MUTE_DB else f"-{amount} dB")
+        self.audio_engine.set_duck(
+            duck_depth(amount) if self.config.get("duck_mic") else 0.0)
 
     def _update_mic_hotkey_buttons(self):
         mute = self.config.get("mute_hotkey")

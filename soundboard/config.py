@@ -177,6 +177,10 @@ def load_config():
     # already been trimmed by hand would otherwise sound different the
     # first time it is opened by a version that has this.
     config.setdefault("match_levels", False)
+    # Ducking the mic under a playing clip: off by default, and stored in
+    # dB so the setting means the same thing whatever the mic volume is.
+    config.setdefault("duck_mic", False)
+    config.setdefault("duck_amount", 12)
     # The measured microphone, in LUFS, or None to use dsp's default
     # target until someone measures their voice.
     reference = config.get("reference_lufs")
