@@ -181,8 +181,11 @@ def load_config():
     # dB so the setting means the same thing whatever the mic volume is.
     config.setdefault("duck_mic", False)
     config.setdefault("duck_amount", 12)
-    # How long a stop takes to fade. Short enough to still feel like a
-    # stop, long enough that "Stop all" is not a click mid-note.
+    # Fading a stop is off by default: cutting a clip dead is what every
+    # board already does, and a stop that suddenly takes time to happen
+    # is not a change to make behind someone's back. The length is kept
+    # whether or not it is switched on, like the duck amount.
+    config.setdefault("stop_fade_on", False)
     config.setdefault("stop_fade", 0.08)
     # The measured microphone, in LUFS, or None to use dsp's default
     # target until someone measures their voice.
