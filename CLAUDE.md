@@ -20,6 +20,21 @@ virtual audio cable.
   executable cannot take someone's board with it
 
 ## Stack notes
+- Look: theme.py holds one palette and one metric table per platform
+  (macOS, Windows, a neutral Linux fallback) and every colour token is a
+  (light, dark) pair, which CustomTkinter resolves against the appearance
+  mode by itself. apply_theme() pushes the metrics into
+  ctk.ThemeManager.theme before the first widget is built, so radius,
+  control height and the system font reach widgets that never ask for
+  them - which is why call sites should pass a colour only when it
+  differs from the theme's, and why a widget built before apply_theme()
+  keeps the old defaults. Raw tkinter widgets cannot take a pair: they go
+  through register_tk() (options) or on_appearance_change() (anything
+  drawn, like the editor's waveform). SOUNDBOARD_PLATFORM=macos|windows
+  |linux forces another platform's look, which is how both are checked
+  from one machine and how tools/make_tutorial_shots.py takes each
+  platform's screenshots. Appearance is config "appearance":
+  system/light/dark
 - Windows: device lists filtered to one host API (WASAPI with
   auto_convert, falling back to MME; choice saved as config "host_api")
 - Linux: sounddevice doesn't bundle PortAudio (libportaudio2); a missing

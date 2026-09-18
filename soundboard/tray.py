@@ -9,21 +9,28 @@ import customtkinter as ctk
 
 from . import autostart
 from .config import ICON_PATH, save_config
-from .theme import COLOR_BG, COLOR_ORANGE, COLOR_ORANGE_HOVER, COLOR_SURFACE, COLOR_TEXT
+from .theme import (
+    COLOR_ON_ACCENT,
+    COLOR_ORANGE,
+    COLOR_ORANGE_HOVER,
+    COLOR_TEXT,
+    COLOR_TEXT_DIM,
+    font,
+)
 
 
 class TrayMixin:
     """Expects `config`, `root` and `tray_icon` from Soundboard."""
 
     def _build_startup_controls(self, frame, row):
-        ctk.CTkLabel(frame, text="Startup:", text_color=COLOR_TEXT).grid(
+        ctk.CTkLabel(frame, text="Startup:", text_color=COLOR_TEXT_DIM, font=font("small_bold")).grid(
             row=row, column=0, sticky="w", padx=8, pady=6
         )
-        box = ctk.CTkFrame(frame, fg_color=COLOR_SURFACE)
+        box = ctk.CTkFrame(frame, fg_color="transparent")
         box.grid(row=row, column=1, columnspan=2, sticky="ew", padx=8, pady=6)
         checkbox = dict(
             fg_color=COLOR_ORANGE, hover_color=COLOR_ORANGE_HOVER,
-            checkmark_color=COLOR_BG, text_color=COLOR_TEXT,
+            checkmark_color=COLOR_ON_ACCENT, text_color=COLOR_TEXT,
         )
         self.autostart_checkbox = ctk.CTkCheckBox(
             box, text="Start with the computer", command=self._on_toggle_autostart, **checkbox

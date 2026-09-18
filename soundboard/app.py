@@ -25,7 +25,25 @@ from .editor_tab import EditorMixin
 from .mic_hotkeys import MicHotkeyMixin
 from .share_tab import ShareMixin
 from .sound_list import SoundListMixin
-from .theme import COLOR_BG, COLOR_ERROR, COLOR_ORANGE, COLOR_ORANGE_HOVER, COLOR_ROW, COLOR_SURFACE, COLOR_TEXT
+from .theme import (
+    COLOR_BG,
+    COLOR_BORDER,
+    COLOR_ERROR_TEXT,
+    COLOR_ON_ACCENT,
+    COLOR_ORANGE,
+    COLOR_ORANGE_HOVER,
+    COLOR_ROW,
+    COLOR_ROW_HOVER,
+    COLOR_TEXT,
+    COLOR_TEXT_DIM,
+    CONTROL_H,
+    GAP,
+    PAD,
+    apply_theme,
+    font,
+    register_tk,
+    set_appearance,
+)
 from . import updater
 from .tray import TrayMixin
 from .tutorial import TutorialWindow
@@ -36,7 +54,6 @@ class Soundboard(DeviceMixin, MicHotkeyMixin, SoundListMixin, DownloadMixin, Edi
     def __init__(self, root):
         self.root = root
         self.root.title("Soundboard")
-        self.root.configure(fg_color=COLOR_BG)
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
 
         ensure_sounds_dir()
@@ -53,6 +70,12 @@ class Soundboard(DeviceMixin, MicHotkeyMixin, SoundListMixin, DownloadMixin, Edi
             )
             self.config = load_config()
         is_first_run = not os.path.exists(CONFIG_PATH)
+
+        # The look has to be in place before the first widget is built:
+        # CustomTkinter reads its defaults at widget construction, so a
+        # theme applied later would only reach whatever came after it.
+        apply_theme(self.config.get("appearance", "system"))
+        self.root.configure(fg_color=COLOR_BG)
 
         self.audio_engine = AudioEngine()
         self.audio_engine.on_error = self._on_playback_error
@@ -98,33 +121,39 @@ class Soundboard(DeviceMixin, MicHotkeyMixin, SoundListMixin, DownloadMixin, Edi
 
         self.tabview = ctk.CTkTabview(
             self.root,
-            fg_color=COLOR_SURFACE,
-            segmented_button_fg_color=COLOR_SURFACE,
+            fg_color=COLOR_BG,
+            border_width=0,
+            segmented_button_fg_color=COLOR_ROW,
             segmented_button_selected_color=COLOR_ORANGE,
             segmented_button_selected_hover_color=COLOR_ORANGE_HOVER,
             segmented_button_unselected_color=COLOR_ROW,
+            segmented_button_unselected_hover_color=COLOR_ROW_HOVER,
             text_color=COLOR_TEXT,
+            anchor="w",
         )
-        self.tabview.pack(fill="both", expand=True, padx=8, pady=8)
+        self.tabview.pack(fill="both", expand=True, padx=PAD, pady=(GAP, PAD))
+        self.tabview._segmented_button.configure(font=font("body_bold"))
 
         # The ask was the window's own title bar, which Tk cannot reach: it
         # is the non-client area, and the only way in is to drop the native
         # one and rebuild snap, tiling and the caption buttons by hand. The
         # tab strip's row is the next row down, and is where this goes.
         self.help_button = ctk.CTkButton(
-            self.root, text="?", width=28, height=28, command=self.open_tutorial,
-            fg_color=COLOR_ROW, hover_color=COLOR_SURFACE, text_color=COLOR_ORANGE,
-            border_width=1, border_color=COLOR_ORANGE,
-            font=ctk.CTkFont(size=14, weight="bold"),
+            self.root, text="?", width=CONTROL_H, height=CONTROL_H,
+            command=self.open_tutorial,
+            fg_color=COLOR_ROW, hover_color=COLOR_ROW_HOVER, text_color=COLOR_TEXT,
+            border_width=1, border_color=COLOR_BORDER,
+            font=font("body_bold"),
         )
-        self.help_button.place(in_=self.tabview, relx=1.0, x=-10, y=6, anchor="ne")
+        self.help_button.place(in_=self.tabview, relx=1.0, x=-8, y=6, anchor="ne")
         self._tutorial = None
 
         # Same row as the ? - it is where anything global lives. Hidden
         # until a check finds something, so it is never a dead control.
         self.update_button = ctk.CTkButton(
-            self.root, text="", height=28, command=self.open_update,
-            fg_color=COLOR_ORANGE, hover_color=COLOR_ORANGE_HOVER, text_color=COLOR_BG,
+            self.root, text="", height=CONTROL_H, command=self.open_update,
+            fg_color=COLOR_ORANGE, hover_color=COLOR_ORANGE_HOVER,
+            text_color=COLOR_ON_ACCENT, font=font("body_bold"),
         )
         self._update_release = None
         self._update_dialog = None
@@ -139,14 +168,20 @@ class Soundboard(DeviceMixin, MicHotkeyMixin, SoundListMixin, DownloadMixin, Edi
 
         self._build_device_selectors(board_tab)
         # Holder stays packed so the warning can appear above the sound list.
-        warning_holder = tk.Frame(board_tab, bg=COLOR_BG, height=1)
+        warning_holder = tk.Frame(board_tab, height=1)
+        register_tk(warning_holder, bg=COLOR_BG)
         warning_holder.pack(fill="x")
         self.loop_warning = ctk.CTkLabel(
-            warning_holder, text="", text_color=COLOR_ERROR, justify="left", anchor="w", wraplength=800,
+            warning_holder, text="", text_color=COLOR_ERROR_TEXT, justify="left", anchor="w", wraplength=800,
         )
         self._build_permission_warning(warning_holder)
-        self._build_sound_list(board_tab)
+        # The controls are packed before the list although they sit below
+        # it: the list is the expanding child, and whatever is packed after
+        # it gets whatever is left of the cavity, which was nothing. Pack
+        # the fixed-height row against the bottom first and the list takes
+        # the rest. The editor tab does the same thing for the same reason.
         self._build_controls(board_tab)
+        self._build_sound_list(board_tab)
 
         self._build_download_tab(download_tab)
         self._build_editor_tab(editor_tab)
@@ -160,6 +195,28 @@ class Soundboard(DeviceMixin, MicHotkeyMixin, SoundListMixin, DownloadMixin, Edi
         )
         if self.config["close_to_tray"]:
             self._start_tray()
+
+    def _build_appearance_controls(self, frame, row):
+        """Light/dark, or follow the OS. "System" is the default and is
+        what most people will leave it on; the other two are for a desktop
+        whose theme the app cannot read, and for anyone who wants the app
+        to disagree with it on purpose."""
+        ctk.CTkLabel(
+            frame, text="Appearance:", text_color=COLOR_TEXT_DIM, font=font("small_bold"),
+        ).grid(row=row, column=0, sticky="w", padx=8, pady=6)
+        box = ctk.CTkFrame(frame, fg_color="transparent")
+        box.grid(row=row, column=1, columnspan=2, sticky="w", padx=8, pady=6)
+        self.appearance_switch = ctk.CTkSegmentedButton(
+            box, values=["System", "Light", "Dark"],
+            command=self._on_appearance_change,
+        )
+        self.appearance_switch.set(self.config.get("appearance", "system").capitalize())
+        self.appearance_switch.pack(side="left")
+
+    def _on_appearance_change(self, choice):
+        mode = choice.lower()
+        self.config["appearance"] = set_appearance(mode)
+        save_config(self.config)
 
     @property
     def profile(self):
@@ -194,7 +251,7 @@ class Soundboard(DeviceMixin, MicHotkeyMixin, SoundListMixin, DownloadMixin, Edi
             return
         self._update_release = release
         self.update_button.configure(text=f"Update to {release.version}")
-        self.update_button.place(in_=self.tabview, relx=1.0, x=-46, y=6, anchor="ne")
+        self.update_button.place(in_=self.tabview, relx=1.0, x=-(CONTROL_H + 16), y=6, anchor="ne")
 
     def open_update(self):
         """One window, reused: a second dialog would download and install

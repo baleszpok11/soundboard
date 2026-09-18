@@ -23,15 +23,26 @@ from .config import (
 )
 from .dialogs import TextDialog
 from .theme import (
+    CARD_BORDER,
     COLOR_BG,
+    COLOR_BORDER,
     COLOR_ERROR,
+    COLOR_ERROR_HOVER,
+    COLOR_ERROR_TEXT,
+    COLOR_ON_ACCENT,
+    COLOR_ON_ERROR,
     COLOR_ORANGE,
     COLOR_ORANGE_HOVER,
     COLOR_ROW,
+    COLOR_ROW_HOVER,
     COLOR_SURFACE,
     COLOR_TEXT,
     COLOR_TEXT_DIM,
+    GAP,
+    RADIUS_CONTROL,
     VOLUME_MAX,
+    font,
+    resolve,
 )
 
 PLAYING_POLL_MS = 100  # how often the board re-reads what the engine is playing
@@ -51,15 +62,13 @@ class SoundListMixin:
         self.profile_menu = ctk.CTkOptionMenu(
             bar, variable=self.profile_var, values=self._profile_names(),
             command=self._on_profile_change,
-            fg_color=COLOR_ROW, button_color=COLOR_ORANGE,
-            button_hover_color=COLOR_ORANGE_HOVER, text_color=COLOR_TEXT,
-            dropdown_fg_color=COLOR_ROW,
+            fg_color=COLOR_ROW, text_color=COLOR_TEXT,
         )
         self.profile_menu.pack(side="left")
         manage = ctk.CTkButton(
             bar, text="Manage", width=80,
-            fg_color=COLOR_ROW, hover_color=COLOR_SURFACE, text_color=COLOR_ORANGE,
-            border_width=1, border_color=COLOR_ORANGE,
+            fg_color=COLOR_ROW, hover_color=COLOR_ROW_HOVER, text_color=COLOR_TEXT,
+            border_width=1, border_color=COLOR_BORDER,
         )
         manage.configure(command=lambda b=manage: self._show_profile_menu(b))
         manage.pack(side="left", padx=(8, 0))
@@ -95,8 +104,9 @@ class SoundListMixin:
 
     def _show_profile_menu(self, anchor):
         menu = tk.Menu(
-            self.root, tearoff=0, bg=COLOR_ROW, fg=COLOR_TEXT,
-            activebackground=COLOR_ORANGE, activeforeground=COLOR_BG,
+            self.root, tearoff=0, bg=resolve(COLOR_SURFACE), fg=resolve(COLOR_TEXT),
+            activebackground=resolve(COLOR_ORANGE), activeforeground=resolve(COLOR_ON_ACCENT),
+            borderwidth=0, activeborderwidth=0,
         )
         menu.add_command(label="New profile...", command=self.new_profile)
         menu.add_command(label="Rename...", command=self.rename_profile)
@@ -166,27 +176,23 @@ class SoundListMixin:
         # No textvariable: CTkEntry hides its placeholder when one is set.
         self.search_entry = ctk.CTkEntry(
             toolbar, placeholder_text="Search sounds...",
-            fg_color=COLOR_ROW, text_color=COLOR_TEXT, border_color=COLOR_ORANGE,
+            fg_color=COLOR_ROW, text_color=COLOR_TEXT, border_color=COLOR_BORDER,
         )
         self.search_entry.pack(side="left", fill="x", expand=True)
         self._search_text = ""
         self.search_entry.bind("<KeyRelease>", self._on_search)
         self.view_switch = ctk.CTkSegmentedButton(
-            toolbar, values=["List", "Grid"], command=self._on_view_change,
-            selected_color=COLOR_ORANGE, selected_hover_color=COLOR_ORANGE_HOVER,
-            unselected_color=COLOR_ROW, unselected_hover_color=COLOR_SURFACE,
+            toolbar, values=["List", "Grid"], command=self._on_view_change, selected_hover_color=COLOR_ORANGE_HOVER, unselected_hover_color=COLOR_SURFACE,
             text_color=COLOR_TEXT,
         )
         self.view_switch.set("Grid" if self.config["sound_view"] == "grid" else "List")
         self.view_switch.pack(side="left", padx=(8, 0))
 
-        self.list_frame = ctk.CTkScrollableFrame(
-            parent,
-            fg_color=COLOR_SURFACE,
-            label_text="Sounds",
-            label_text_color=COLOR_ORANGE,
-        )
-        self.list_frame.pack(fill="both", expand=True, padx=4, pady=6)
+        # No label bar: it was a full-width strip of chrome restating the
+        # name of the tab it sits in. The rows read as cards against the
+        # tab's own background instead.
+        self.list_frame = ctk.CTkScrollableFrame(parent, fg_color=COLOR_BG)
+        self.list_frame.pack(fill="both", expand=True, padx=2, pady=(0, GAP))
         self._grid_columns = 0
         # add="+" matters: CTkScrollableFrame binds <Configure> on this same
         # frame to refresh the canvas scrollregion. Replacing that binding
@@ -300,7 +306,7 @@ class SoundListMixin:
                 command=lambda s=sound: self.play_sound(s),
                 fg_color=COLOR_ORANGE if enabled and not missing else COLOR_ROW,
                 hover_color=COLOR_ORANGE_HOVER,
-                text_color=COLOR_BG if enabled and not missing else (COLOR_ERROR if missing else COLOR_TEXT_DIM),
+                text_color=COLOR_ON_ACCENT if enabled and not missing else (COLOR_ERROR if missing else COLOR_TEXT_DIM),
             )
             button.pack(fill="x")
             menu = lambda e, i=idx: self._show_sound_menu(e, i, with_hotkey=True)
@@ -321,7 +327,10 @@ class SoundListMixin:
         resolved_path = resolve_sound_path(sound["path"])
         # The outer frame carries the drag target and the progress bar; the
         # inner one keeps the controls on a single line.
-        outer = ctk.CTkFrame(self.list_frame, fg_color=COLOR_ROW, border_width=1, border_color=COLOR_ROW)
+        outer = ctk.CTkFrame(
+            self.list_frame, fg_color=COLOR_SURFACE, corner_radius=RADIUS_CONTROL,
+            border_width=CARD_BORDER, border_color=COLOR_BORDER,
+        )
         outer.pack(fill="x", pady=3, padx=2)
         outer.sound_index = idx
         row = ctk.CTkFrame(outer, fg_color="transparent")
@@ -339,7 +348,7 @@ class SoundListMixin:
             width=24,
             fg_color=COLOR_ORANGE,
             hover_color=COLOR_ORANGE_HOVER,
-            checkmark_color=COLOR_BG,
+            checkmark_color=COLOR_ON_ACCENT,
         )
         if sound.get("enabled", True):
             checkbox.select()
@@ -352,60 +361,71 @@ class SoundListMixin:
         name = sound["name"]
         if len(name) > 40:  # long titles would push the buttons out of the row
             name = name[:37] + "..."
-        label_text = f"{name}  [{sound.get('hotkey') or 'no hotkey'}]"
-        if sound.get("loop"):
-            label_text += "  (loop)"
-        if missing:
-            label_text += "  (file missing)"
+        # Name and status are two labels, not one string: the name is what
+        # the eye looks for, and running them together at one weight made
+        # the hotkey and the warnings compete with it.
+        names = ctk.CTkFrame(row, fg_color="transparent")
+        names.pack(side="left", fill="x", expand=True, padx=GAP)
         label = ctk.CTkLabel(
-            row,
-            text=label_text,
-            anchor="w",
-            text_color=COLOR_ERROR if missing else COLOR_TEXT,
+            names, text=name, anchor="w", font=font("body_bold"),
+            text_color=COLOR_ERROR_TEXT if missing else COLOR_TEXT,
         )
-        label.pack(side="left", fill="x", expand=True, padx=4)
-        label.bind("<Double-Button-1>", lambda e, i=idx: self.rename_sound(i))
+        label.pack(fill="x")
+        meta = [sound.get("hotkey") or "no hotkey"]
+        if sound.get("loop"):
+            meta.append("loop")
+        if missing:
+            meta.append("file missing")
+        meta_label = ctk.CTkLabel(
+            names, text="  -  ".join(meta), anchor="w", font=font("small"),
+            text_color=COLOR_ERROR_TEXT if missing else COLOR_TEXT_DIM,
+        )
+        meta_label.pack(fill="x")
+        for widget in (label, meta_label):
+            widget.bind("<Double-Button-1>", lambda e, i=idx: self.rename_sound(i))
 
-        volume_label = ctk.CTkLabel(row, text=f"{sound['volume']}%", width=42, text_color=COLOR_TEXT_DIM)
+        volume_label = ctk.CTkLabel(
+            row, text=f"{sound['volume']}%", width=42,
+            font=font("small"), text_color=COLOR_TEXT_DIM,
+        )
         volume_slider = ctk.CTkSlider(
             row, from_=0, to=VOLUME_MAX, number_of_steps=VOLUME_MAX, width=100,
             command=lambda value, s=sound, lbl=volume_label: self._on_sound_volume(s, lbl, value),
-            fg_color=COLOR_SURFACE, progress_color=COLOR_ORANGE,
-            button_color=COLOR_ORANGE, button_hover_color=COLOR_ORANGE_HOVER,
         )
         volume_slider.set(sound["volume"])
         volume_slider.pack(side="left", padx=(3, 0))
         volume_label.pack(side="left", padx=(0, 3))
 
         ctk.CTkButton(
-            row, text="Play", width=60,
+            row, text="Play", width=64, font=font("body_bold"),
             command=lambda s=sound: self.play_sound(s),
-            fg_color=COLOR_ORANGE, hover_color=COLOR_ORANGE_HOVER, text_color=COLOR_BG,
+            fg_color=COLOR_ORANGE, hover_color=COLOR_ORANGE_HOVER, text_color=COLOR_ON_ACCENT,
         ).pack(side="left", padx=3)
         # Built now, shown only while this sound is playing, so an idle
         # board isn't a wall of dead buttons.
         stop = ctk.CTkButton(
             row, text="Stop", width=60,
             command=lambda s=sound: self.stop_sound(s),
-            fg_color=COLOR_ERROR, hover_color="#cc4444", text_color=COLOR_BG,
+            fg_color=COLOR_ERROR, hover_color=COLOR_ERROR_HOVER, text_color=COLOR_ON_ERROR,
         )
         hotkey_button = ctk.CTkButton(
             row, text="Hotkey", width=70,
             command=lambda i=idx: self.set_hotkey(i),
-            fg_color=COLOR_ROW, hover_color=COLOR_SURFACE, text_color=COLOR_ORANGE,
-            border_width=1, border_color=COLOR_ORANGE,
+            fg_color=COLOR_ROW, hover_color=COLOR_ROW_HOVER, text_color=COLOR_TEXT,
+            border_width=1, border_color=COLOR_BORDER,
         )
         hotkey_button.pack(side="left", padx=3)
         more = ctk.CTkButton(
             row, text="More", width=60,
-            fg_color=COLOR_ROW, hover_color=COLOR_SURFACE, text_color=COLOR_ORANGE,
-            border_width=1, border_color=COLOR_ORANGE,
+            fg_color=COLOR_ROW, hover_color=COLOR_ROW_HOVER, text_color=COLOR_TEXT,
+            border_width=1, border_color=COLOR_BORDER,
         )
         more.configure(command=lambda i=idx, b=more: self._show_sound_menu(None, i, anchor=b))
         more.pack(side="left", padx=(3, 8))
 
         progress = ctk.CTkProgressBar(
-            outer, height=3, corner_radius=0, fg_color=COLOR_ROW, progress_color=COLOR_ROW,
+            outer, height=3, corner_radius=0,
+            fg_color=COLOR_SURFACE, progress_color=COLOR_SURFACE,
         )
         progress.set(0)
         progress.pack(fill="x", padx=8, pady=(0, 4))
@@ -416,8 +436,9 @@ class SoundListMixin:
 
     def _show_sound_menu(self, event, index, anchor=None, with_hotkey=False):
         menu = tk.Menu(
-            self.root, tearoff=0, bg=COLOR_ROW, fg=COLOR_TEXT,
-            activebackground=COLOR_ORANGE, activeforeground=COLOR_BG,
+            self.root, tearoff=0, bg=resolve(COLOR_SURFACE), fg=resolve(COLOR_TEXT),
+            activebackground=resolve(COLOR_ORANGE), activeforeground=resolve(COLOR_ON_ACCENT),
+            borderwidth=0, activeborderwidth=0,
         )
         count = len(self.sounds)
         sound = self.sounds[index]
@@ -497,7 +518,7 @@ class SoundListMixin:
             self._drag_target.configure(border_color=COLOR_ROW)
         self._drag_target = row
         if row is not None:
-            row.configure(border_color=COLOR_ORANGE)
+            row.configure(border_color=COLOR_BORDER)
 
     def _end_drag(self, _event):
         target, source = self._drag_target, self._drag_from
@@ -522,26 +543,26 @@ class SoundListMixin:
 
     def _build_controls(self, parent):
         frame = ctk.CTkFrame(parent, fg_color=COLOR_BG)
-        frame.pack(fill="x", padx=4, pady=(6, 4))
+        frame.pack(side="bottom", fill="x", padx=2, pady=(GAP, 2))
         ctk.CTkButton(
             frame, text="Add sound", command=self.add_sound,
-            fg_color=COLOR_ORANGE, hover_color=COLOR_ORANGE_HOVER, text_color=COLOR_BG,
+            fg_color=COLOR_ORANGE, hover_color=COLOR_ORANGE_HOVER, text_color=COLOR_ON_ACCENT,
         ).pack(side="left")
         ctk.CTkButton(
             frame, text="Stop all", command=self.audio_engine.stop_all,
-            fg_color=COLOR_ERROR, hover_color="#cc4444", text_color=COLOR_BG,
+            fg_color=COLOR_ERROR, hover_color=COLOR_ERROR_HOVER, text_color=COLOR_ON_ERROR,
         ).pack(side="left", padx=(8, 0))
         self.stop_hotkey_button = ctk.CTkButton(
             frame, text="", command=self.set_stop_hotkey,
-            fg_color=COLOR_ROW, hover_color=COLOR_SURFACE, text_color=COLOR_ORANGE,
-            border_width=1, border_color=COLOR_ORANGE,
+            fg_color=COLOR_ROW, hover_color=COLOR_ROW_HOVER, text_color=COLOR_TEXT,
+            border_width=1, border_color=COLOR_BORDER,
         )
         self.stop_hotkey_button.pack(side="left", padx=(8, 0))
         self._update_stop_hotkey_button()
         ctk.CTkButton(
             frame, text="Report a bug", width=110, command=self.report_bug,
-            fg_color=COLOR_ROW, hover_color=COLOR_SURFACE, text_color=COLOR_ORANGE,
-            border_width=1, border_color=COLOR_ORANGE,
+            fg_color=COLOR_ROW, hover_color=COLOR_ROW_HOVER, text_color=COLOR_TEXT,
+            border_width=1, border_color=COLOR_BORDER,
         ).pack(side="right", padx=(8, 0))
         self.dropout_label = ctk.CTkLabel(frame, text="", text_color=COLOR_TEXT_DIM)
         self.dropout_label.pack(side="right")

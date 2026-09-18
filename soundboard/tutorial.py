@@ -18,13 +18,17 @@ import customtkinter as ctk
 
 from .config import ASSETS_DIR
 from .theme import (
+    COLOR_ACCENT_TEXT,
     COLOR_BG,
-    COLOR_ORANGE,
+    COLOR_BORDER,
     COLOR_ORANGE_HOVER,
     COLOR_ROW,
+    COLOR_ROW_HOVER,
     COLOR_SURFACE,
     COLOR_TEXT,
     COLOR_TEXT_DIM,
+    font,
+    register_tk,
 )
 
 WINDOWS = "Windows"
@@ -200,9 +204,7 @@ class TutorialWindow(ctk.CTkToplevel):
             header, text="Your system:", text_color=COLOR_TEXT,
         ).pack(side="left", padx=(10, 8), pady=10)
         self.platform_picker = ctk.CTkSegmentedButton(
-            header, values=list(PLATFORMS), command=self._show_page,
-            selected_color=COLOR_ORANGE, selected_hover_color=COLOR_ORANGE_HOVER,
-            unselected_color=COLOR_ROW, unselected_hover_color=COLOR_SURFACE,
+            header, values=list(PLATFORMS), command=self._show_page, selected_hover_color=COLOR_ORANGE_HOVER, unselected_hover_color=COLOR_SURFACE,
             text_color=COLOR_TEXT,
         )
         self.platform_picker.pack(side="left", pady=10)
@@ -247,7 +249,7 @@ class TutorialWindow(ctk.CTkToplevel):
         frame = ctk.CTkFrame(self.body, fg_color=COLOR_SURFACE)
         frame.pack(fill="x", padx=4, pady=6)
         ctk.CTkLabel(
-            frame, text=f"{number}. {title}", text_color=COLOR_ORANGE,
+            frame, text=f"{number}. {title}", text_color=COLOR_ACCENT_TEXT,
             anchor="w", font=ctk.CTkFont(size=14, weight="bold"),
         ).pack(fill="x", padx=12, pady=(10, 0))
         ctk.CTkLabel(
@@ -257,10 +259,10 @@ class TutorialWindow(ctk.CTkToplevel):
 
     def _warning(self, text):
         frame = ctk.CTkFrame(self.body, fg_color=COLOR_SURFACE,
-                             border_width=1, border_color=COLOR_ORANGE)
+                             border_width=1, border_color=COLOR_BORDER)
         frame.pack(fill="x", padx=4, pady=6)
         ctk.CTkLabel(
-            frame, text="If others hear themselves back", text_color=COLOR_ORANGE,
+            frame, text="If others hear themselves back", text_color=COLOR_ACCENT_TEXT,
             anchor="w", font=ctk.CTkFont(size=14, weight="bold"),
         ).pack(fill="x", padx=12, pady=(10, 0))
         ctk.CTkLabel(
@@ -271,10 +273,10 @@ class TutorialWindow(ctk.CTkToplevel):
     def _code(self, command):
         """Selectable, because these are meant to be copied."""
         box = tk.Text(
-            self.body, height=1, wrap="word", bg=COLOR_ROW, fg=COLOR_TEXT,
-            insertbackground=COLOR_TEXT, relief="flat", padx=10, pady=8,
-            font=("TkFixedFont", 11), highlightthickness=0,
+            self.body, height=1, wrap="word", relief="flat", padx=10, pady=8,
+            font=font("mono"), highlightthickness=0,
         )
+        register_tk(box, bg=COLOR_ROW, fg=COLOR_TEXT, insertbackground=COLOR_TEXT)
         box.insert("1.0", command)
         box.pack(fill="x", padx=14, pady=(2, 6))
         box.update_idletasks()
@@ -310,6 +312,6 @@ class TutorialWindow(ctk.CTkToplevel):
         ctk.CTkButton(
             self.body, text=label, command=lambda: webbrowser.open(url),
             width=260, anchor="w",
-            fg_color=COLOR_ROW, hover_color=COLOR_SURFACE, text_color=COLOR_ORANGE,
-            border_width=1, border_color=COLOR_ORANGE,
+            fg_color=COLOR_ROW, hover_color=COLOR_ROW_HOVER, text_color=COLOR_TEXT,
+            border_width=1, border_color=COLOR_BORDER,
         ).pack(anchor="w", padx=14, pady=(2, 6))

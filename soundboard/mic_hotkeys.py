@@ -18,12 +18,15 @@ from .hotkeys import (
     request_hotkey_permission,
 )
 from .theme import (
+    COLOR_ACCENT_TEXT,
     COLOR_BG,
+    COLOR_BORDER,
     COLOR_ERROR,
+    COLOR_ON_ACCENT,
     COLOR_ORANGE,
     COLOR_ORANGE_HOVER,
     COLOR_ROW,
-    COLOR_SURFACE,
+    COLOR_ROW_HOVER,
     COLOR_TEXT,
     COLOR_TEXT_DIM,
 )
@@ -37,15 +40,15 @@ class MicHotkeyMixin:
 
     def _build_mic_controls(self, frame, row):
         ctk.CTkLabel(frame, text="Mic:", text_color=COLOR_TEXT).grid(row=row, column=0, sticky="w", padx=8, pady=6)
-        box = ctk.CTkFrame(frame, fg_color=COLOR_SURFACE)
+        box = ctk.CTkFrame(frame, fg_color="transparent")
         box.grid(row=row, column=1, columnspan=2, sticky="ew", padx=8, pady=6)
         checkbox = dict(
             fg_color=COLOR_ORANGE, hover_color=COLOR_ORANGE_HOVER,
-            checkmark_color=COLOR_BG, text_color=COLOR_TEXT,
+            checkmark_color=COLOR_ON_ACCENT, text_color=COLOR_TEXT,
         )
         button = dict(
-            fg_color=COLOR_ROW, hover_color=COLOR_SURFACE, text_color=COLOR_ORANGE,
-            border_width=1, border_color=COLOR_ORANGE,
+            fg_color=COLOR_ROW, hover_color=COLOR_ROW_HOVER, text_color=COLOR_TEXT,
+            border_width=1, border_color=COLOR_BORDER,
         )
         self.mute_checkbox = ctk.CTkCheckBox(box, text="Mute mic", command=self._on_toggle_mute, **checkbox)
         self.mute_checkbox.grid(row=0, column=0, sticky="w")
@@ -84,7 +87,7 @@ class MicHotkeyMixin:
             status, color = "Hold the talk key to speak", COLOR_TEXT_DIM
         else:
             live = True
-            status, color = "Live", COLOR_ORANGE
+            status, color = "Live", COLOR_ACCENT_TEXT
         self.audio_engine.mic_enabled = live
         self.mic_status.configure(text=status, text_color=color)
 
@@ -253,8 +256,8 @@ class MicHotkeyMixin:
         ctk.CTkButton(
             self.permission_warning, text="Open settings", width=110,
             command=lambda: subprocess.run(["open", MACOS_INPUT_MONITORING_URL]),
-            fg_color=COLOR_ROW, hover_color=COLOR_SURFACE, text_color=COLOR_ORANGE,
-            border_width=1, border_color=COLOR_ORANGE,
+            fg_color=COLOR_ROW, hover_color=COLOR_ROW_HOVER, text_color=COLOR_TEXT,
+            border_width=1, border_color=COLOR_BORDER,
         ).pack(side="left")
         self._hotkeys_allowed = True
         self._permission_requested = False

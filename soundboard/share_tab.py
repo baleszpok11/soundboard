@@ -17,11 +17,14 @@ from . import board_file
 from .config import APP_VERSION, resolve_sound_path, save_config, unique_profile_name
 from .downloader import ClipUnavailable, fetch_clip
 from .theme import (
-    COLOR_BG,
+    COLOR_ACCENT_TEXT,
+    COLOR_BORDER,
     COLOR_ERROR,
+    COLOR_ON_ACCENT,
     COLOR_ORANGE,
     COLOR_ORANGE_HOVER,
     COLOR_ROW,
+    COLOR_ROW_HOVER,
     COLOR_SURFACE,
     COLOR_TEXT,
     COLOR_TEXT_DIM,
@@ -43,7 +46,7 @@ class ShareMixin:
         export = ctk.CTkFrame(parent, fg_color=COLOR_SURFACE)
         export.pack(fill="x", padx=4, pady=4)
         ctk.CTkLabel(
-            export, text="Export", text_color=COLOR_ORANGE, anchor="w",
+            export, text="Export", text_color=COLOR_ACCENT_TEXT, anchor="w",
         ).pack(fill="x", padx=8, pady=(8, 0))
         ctk.CTkLabel(
             export,
@@ -56,9 +59,7 @@ class ShareMixin:
         row.pack(fill="x", padx=8, pady=(0, 6))
         ctk.CTkLabel(row, text="What to export:", text_color=COLOR_TEXT).pack(side="left", padx=(0, 8))
         self.export_scope = ctk.CTkSegmentedButton(
-            row, values=[ACTIVE_ONLY, ALL_PROFILES], command=lambda _v: self._update_export_summary(),
-            selected_color=COLOR_ORANGE, selected_hover_color=COLOR_ORANGE_HOVER,
-            unselected_color=COLOR_ROW, unselected_hover_color=COLOR_SURFACE, text_color=COLOR_TEXT,
+            row, values=[ACTIVE_ONLY, ALL_PROFILES], command=lambda _v: self._update_export_summary(), selected_hover_color=COLOR_ORANGE_HOVER, unselected_hover_color=COLOR_SURFACE, text_color=COLOR_TEXT,
         )
         self.export_scope.set(ACTIVE_ONLY)
         self.export_scope.pack(side="left")
@@ -69,13 +70,13 @@ class ShareMixin:
         self.export_summary.pack(fill="x", padx=8, pady=(0, 6))
         self.export_button = ctk.CTkButton(
             export, text="Export...", command=self.export_board,
-            fg_color=COLOR_ORANGE, hover_color=COLOR_ORANGE_HOVER, text_color=COLOR_BG,
+            fg_color=COLOR_ORANGE, hover_color=COLOR_ORANGE_HOVER, text_color=COLOR_ON_ACCENT,
         )
         self.export_button.pack(anchor="w", padx=8, pady=(0, 10))
 
         imp = ctk.CTkFrame(parent, fg_color=COLOR_SURFACE)
         imp.pack(fill="both", expand=True, padx=4, pady=4)
-        ctk.CTkLabel(imp, text="Import", text_color=COLOR_ORANGE, anchor="w").pack(
+        ctk.CTkLabel(imp, text="Import", text_color=COLOR_ACCENT_TEXT, anchor="w").pack(
             fill="x", padx=8, pady=(8, 0)
         )
         ctk.CTkLabel(
@@ -89,8 +90,8 @@ class ShareMixin:
         row.pack(fill="x", padx=8, pady=(0, 6))
         ctk.CTkButton(
             row, text="Choose file...", command=self._choose_board_file,
-            fg_color=COLOR_ROW, hover_color=COLOR_SURFACE, text_color=COLOR_ORANGE,
-            border_width=1, border_color=COLOR_ORANGE,
+            fg_color=COLOR_ROW, hover_color=COLOR_ROW_HOVER, text_color=COLOR_TEXT,
+            border_width=1, border_color=COLOR_BORDER,
         ).pack(side="left")
         self.import_file_label = ctk.CTkLabel(
             row, text="No file chosen.", text_color=COLOR_TEXT_DIM, anchor="w",
@@ -107,9 +108,7 @@ class ShareMixin:
         row.pack(fill="x", padx=8, pady=(0, 6))
         ctk.CTkLabel(row, text="Add to:", text_color=COLOR_TEXT).pack(side="left", padx=(0, 8))
         self.import_target = ctk.CTkSegmentedButton(
-            row, values=[AS_NEW, INTO_CURRENT],
-            selected_color=COLOR_ORANGE, selected_hover_color=COLOR_ORANGE_HOVER,
-            unselected_color=COLOR_ROW, unselected_hover_color=COLOR_SURFACE, text_color=COLOR_TEXT,
+            row, values=[AS_NEW, INTO_CURRENT], selected_hover_color=COLOR_ORANGE_HOVER, unselected_hover_color=COLOR_SURFACE, text_color=COLOR_TEXT,
         )
         self.import_target.set(AS_NEW)
         self.import_target.pack(side="left")
@@ -118,14 +117,14 @@ class ShareMixin:
         row.pack(fill="x", padx=8, pady=(0, 6))
         self.import_button = ctk.CTkButton(
             row, text="Import", command=self.start_import,
-            fg_color=COLOR_ORANGE, hover_color=COLOR_ORANGE_HOVER, text_color=COLOR_BG,
+            fg_color=COLOR_ORANGE, hover_color=COLOR_ORANGE_HOVER, text_color=COLOR_ON_ACCENT,
             text_color_disabled=COLOR_TEXT_DIM,
         )
         self.import_button.pack(side="left")
         self.import_cancel_button = ctk.CTkButton(
             row, text="Cancel", command=self._cancel_import,
-            fg_color=COLOR_ROW, hover_color=COLOR_SURFACE, text_color=COLOR_ORANGE,
-            border_width=1, border_color=COLOR_ORANGE,
+            fg_color=COLOR_ROW, hover_color=COLOR_ROW_HOVER, text_color=COLOR_TEXT,
+            border_width=1, border_color=COLOR_BORDER,
         )
         self.import_progress = ctk.CTkProgressBar(
             imp, progress_color=COLOR_ORANGE, fg_color=COLOR_ROW,

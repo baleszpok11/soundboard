@@ -48,6 +48,10 @@ together, from one virtual microphone.
   on macOS it downloads and you drag it over)
 - Optionally start with the computer and keep running in the tray /
   menu bar when the window is closed, so hotkeys still work
+- Follows each platform's design language: the system font, control
+  density and corner radius of macOS on a Mac and of Fluent on Windows,
+  in light or dark, following the desktop's own setting unless you pick
+  one under **Appearance**
 - All sounds live in one `Sounds/` folder
 - Settings persist automatically between runs
 - Runs from source (Python) or as a standalone executable — no Python

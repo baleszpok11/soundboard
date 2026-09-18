@@ -153,6 +153,9 @@ def load_config():
     config.setdefault("sound_view", "list")
     config.setdefault("close_to_tray", False)
     config.setdefault("check_for_updates", True)
+    # "system", "light" or "dark"; "system" follows the OS on
+    # Windows and macOS and falls back to light elsewhere.
+    config.setdefault("appearance", "system")
     config.setdefault("skipped_version", None)
     _load_profiles(config)
     return config

@@ -11,15 +11,20 @@ import customtkinter as ctk
 from .audio_engine import SAMPLE_RATE, sd, test_tone
 from .config import save_config
 from .theme import (
-    COLOR_BG,
+    CARD_BORDER,
+    COLOR_BORDER,
     COLOR_ERROR,
+    COLOR_ON_ACCENT,
     COLOR_ORANGE,
     COLOR_ORANGE_HOVER,
     COLOR_ROW,
+    COLOR_ROW_HOVER,
     COLOR_SURFACE,
     COLOR_TEXT,
     COLOR_TEXT_DIM,
+    GAP,
     VOLUME_MAX,
+    font,
 )
 
 NO_DEVICE_LABEL = "(none)"
@@ -118,11 +123,14 @@ class DeviceMixin:
     # -- device selection UI -------------------------------------------------
 
     def _build_device_selectors(self, parent):
-        frame = ctk.CTkFrame(parent, fg_color=COLOR_SURFACE)
-        frame.pack(fill="x", padx=4, pady=(4, 6))
+        frame = ctk.CTkFrame(
+            parent, fg_color=COLOR_SURFACE,
+            border_width=CARD_BORDER, border_color=COLOR_BORDER,
+        )
+        frame.pack(fill="x", padx=2, pady=(2, GAP))
         frame.grid_columnconfigure(1, weight=1)
 
-        ctk.CTkLabel(frame, text="Microphone (input):", text_color=COLOR_TEXT).grid(
+        ctk.CTkLabel(frame, text="Microphone (input):", text_color=COLOR_TEXT_DIM, font=font("small_bold")).grid(
             row=0, column=0, sticky="w", padx=8, pady=8
         )
         input_names = [name for _, name in self.input_devices]
@@ -137,20 +145,17 @@ class DeviceMixin:
             values=input_names,
             command=self._on_input_device_change,
             fg_color=COLOR_ROW,
-            button_color=COLOR_ORANGE,
-            button_hover_color=COLOR_ORANGE_HOVER,
             text_color=COLOR_TEXT,
-            dropdown_fg_color=COLOR_ROW,
         )
         self.input_menu.pack(fill="x")
         self.input_meter = self._build_meter(input_box)
         ctk.CTkButton(
             frame, text="Refresh devices", command=self.refresh_devices,
-            fg_color=COLOR_ROW, hover_color=COLOR_SURFACE, text_color=COLOR_ORANGE,
-            border_width=1, border_color=COLOR_ORANGE,
+            fg_color=COLOR_ROW, hover_color=COLOR_ROW_HOVER, text_color=COLOR_TEXT,
+            border_width=1, border_color=COLOR_BORDER,
         ).grid(row=0, column=2, sticky="w", padx=8, pady=8)
 
-        ctk.CTkLabel(frame, text="Virtual mic output:", text_color=COLOR_TEXT).grid(
+        ctk.CTkLabel(frame, text="Virtual mic output:", text_color=COLOR_TEXT_DIM, font=font("small_bold")).grid(
             row=1, column=0, sticky="w", padx=8, pady=8
         )
         output_names = [name for _, name in self.output_devices]
@@ -164,10 +169,7 @@ class DeviceMixin:
             values=output_names,
             command=self._on_output_device_change,
             fg_color=COLOR_ROW,
-            button_color=COLOR_ORANGE,
-            button_hover_color=COLOR_ORANGE_HOVER,
             text_color=COLOR_TEXT,
-            dropdown_fg_color=COLOR_ROW,
         )
         self.output_menu.pack(fill="x")
         self.output_meter = self._build_meter(output_box)
@@ -179,7 +181,7 @@ class DeviceMixin:
             text="Hear soundboard",
             fg_color=COLOR_ORANGE,
             hover_color=COLOR_ORANGE_HOVER,
-            checkmark_color=COLOR_BG,
+            checkmark_color=COLOR_ON_ACCENT,
             text_color=COLOR_TEXT,
         )
         if self.config.get("hear_self", True):
@@ -190,21 +192,22 @@ class DeviceMixin:
         self.hear_self_checkbox.pack(side="left")
         ctk.CTkButton(
             output_side, text="Test", width=60, command=self.test_output,
-            fg_color=COLOR_ROW, hover_color=COLOR_SURFACE, text_color=COLOR_ORANGE,
-            border_width=1, border_color=COLOR_ORANGE,
+            fg_color=COLOR_ROW, hover_color=COLOR_ROW_HOVER, text_color=COLOR_TEXT,
+            border_width=1, border_color=COLOR_BORDER,
         ).pack(side="left", padx=(8, 0))
 
         self._add_volume_row(frame, 2, "Mic volume:", "mic_volume", "mic_gain")
         self._add_volume_row(frame, 3, "Soundboard volume:", "sound_volume", "sound_gain")
         self._build_mic_controls(frame, 4)
         self._build_startup_controls(frame, 5)
+        self._build_appearance_controls(frame, 6)
 
     # -- level meters ---------------------------------------------------
 
     @staticmethod
     def _build_meter(parent):
         meter = ctk.CTkProgressBar(
-            parent, height=4, corner_radius=0, fg_color=COLOR_ROW, progress_color=COLOR_ROW,
+            parent, height=4, fg_color=COLOR_ROW_HOVER, progress_color=COLOR_ORANGE,
         )
         meter.set(0)
         meter.pack(fill="x", pady=(3, 0))
@@ -247,8 +250,11 @@ class DeviceMixin:
             messagebox.showerror("Test output", str(e))
 
     def _add_volume_row(self, frame, row, text, config_key, engine_attr):
-        ctk.CTkLabel(frame, text=text, text_color=COLOR_TEXT).grid(row=row, column=0, sticky="w", padx=8, pady=6)
-        value_label = ctk.CTkLabel(frame, text=f"{self.config[config_key]}%", text_color=COLOR_TEXT, width=50)
+        ctk.CTkLabel(frame, text=text, text_color=COLOR_TEXT_DIM, font=font("small_bold")).grid(
+            row=row, column=0, sticky="w", padx=8, pady=6)
+        value_label = ctk.CTkLabel(
+            frame, text=f"{self.config[config_key]}%", width=50,
+            font=font("small"), text_color=COLOR_TEXT_DIM)
 
         def on_change(value):
             percent = int(round(value))
@@ -259,8 +265,7 @@ class DeviceMixin:
 
         slider = ctk.CTkSlider(
             frame, from_=0, to=VOLUME_MAX, number_of_steps=VOLUME_MAX, command=on_change,
-            fg_color=COLOR_ROW, progress_color=COLOR_ORANGE,
-            button_color=COLOR_ORANGE, button_hover_color=COLOR_ORANGE_HOVER,
+            fg_color=COLOR_ROW, progress_color=COLOR_ORANGE, button_hover_color=COLOR_ORANGE_HOVER,
         )
         slider.set(self.config[config_key])
         slider.grid(row=row, column=1, sticky="ew", padx=8, pady=6)
