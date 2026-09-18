@@ -44,6 +44,41 @@ def fix_trackpad_scrolling():
     ctk.CTkScrollableFrame.__init__ = __init__
 
 
+def bind_canvas(canvas):
+    """Same gesture, for a canvas we scroll ourselves rather than one
+    CustomTkinter owns - the sound list's VirtualList. Returns whether
+    the binding took, so a caller can tell the wheel is all it has."""
+    if not is_macos():
+        return False
+    try:
+        canvas.bind_all("<TouchpadScroll>", lambda e: _on_canvas_scroll(canvas, e), add="+")
+        return True
+    except Exception:
+        return False  # a Tk that predates the event; the wheel still works
+
+
+def _on_canvas_scroll(canvas, event):
+    try:
+        if not canvas.winfo_exists() or not _under_pointer(canvas, event):
+            return
+    except Exception:
+        return
+    _, delta_y = _deltas(canvas, event)
+    if delta_y:
+        _scroll_pixels(canvas, canvas.yview, canvas.yview_moveto, 1, 3, -delta_y)
+
+
+def _under_pointer(canvas, event):
+    """bind_all fires for every gesture in the app, so a scroll over the
+    editor must not move the board underneath it."""
+    widget = getattr(event, "widget", None)
+    while widget is not None:
+        if widget is canvas:
+            return True
+        widget = getattr(widget, "master", None)
+    return False
+
+
 def _on_scroll(frame, event):
     try:
         if not frame._check_if_valid_scroll(event.widget):
@@ -85,7 +120,12 @@ def _scroll_pixels(canvas, view, move_to, low, high, pixels):
         first, last = view()
         if (first, last) == (0.0, 1.0):
             return  # nothing to scroll in this direction
-        box = canvas.bbox("all")
+        # The scroll region, not bbox("all"): a virtualised list only
+        # holds the items on screen, so their bounds are a screenful
+        # rather than the length of the list, and the gesture would run
+        # the whole way down in one flick.
+        region = canvas.cget("scrollregion")
+        box = [int(float(v)) for v in region.split()] if region else canvas.bbox("all")
         if not box:
             return
         span = box[high] - box[low]
