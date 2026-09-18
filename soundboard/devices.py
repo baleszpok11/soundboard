@@ -590,16 +590,16 @@ class DeviceMixin:
             self._start_audio_engine()
             return
         except Exception as e:
-            error = e
+            failure = e
         if self._fallback_to_mme():
             try:
                 self._start_audio_engine()
                 save_config(self.config)
                 return
             except Exception as e:
-                error = e
+                failure = e
         if show_errors:
-            error(self.root, "Audio device error", str(error))
+            error(self.root, "Audio device error", str(failure))
         self._update_device_warnings()
 
     def _fallback_to_mme(self):
