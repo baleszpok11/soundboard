@@ -7,6 +7,7 @@ import threading
 import time
 
 import numpy as np
+from scipy.signal import butter, sosfilt, sosfilt_zi
 try:
     import sounddevice as sd
 except OSError as e:
@@ -26,6 +27,14 @@ CLIP_CACHE_BYTES = 512 * 1024 * 1024  # decoded clips kept in memory
 LIMITER_CEILING = 0.89  # about -1 dBFS
 LIMITER_RELEASE_S = 0.3
 STREAM_TIMEOUT_S = 2.0  # a running stream with no callbacks for this long is treated as lost
+# Live mic effects. Only what can be done a block at a time belongs here;
+# anything that needs the whole clip stays in dsp.py and the editor.
+MIC_EFFECTS = ("none", "telephone", "robot", "drive")
+MIC_PHONE_BAND_HZ = (300.0, 3000.0)
+# An integer number of cycles per second, so wrapping the oscillator at
+# one second leaves the sine continuous.
+MIC_ROBOT_HZ = 80.0
+MIC_DRIVE_DB = 18.0
 RECORD_MAX_S = 180  # a forgotten recording stops here instead of filling memory
 RECORD_MIN_S = 0.2  # shorter than this is a mis-click, not a clip
 TEST_TONE_S = 0.8
@@ -127,6 +136,91 @@ class _Limiter:
         return block
 
 
+class _MicEffectChain:
+    """The live mic effects, applied a block at a time inside the output
+    callback. Filter state and the oscillator's phase carry over between
+    blocks, or every block boundary would click, and changing effect or
+    amount is crossfaded over a block for the same reason: the mix falls
+    to zero, the new effect is put in place, and the mix comes back up."""
+
+    def __init__(self):
+        self.name = "none"
+        self.amount = 0.0  # 0 to 1
+        self._active = "none"  # what the state below belongs to
+        self._mix = 0.0
+        self._zi = None
+        self._sos = None
+        self._channels = 0
+        self._phase = 0
+
+    def set(self, name, amount):
+        """Caller holds the engine lock, so the callback never sees half
+        a change."""
+        self.name = name if name in MIC_EFFECTS else "none"
+        self.amount = min(1.0, max(0.0, amount))
+
+    @property
+    def idle(self):
+        return self.name == "none" and self._active == "none" and self._mix == 0.0
+
+    def process(self, block):
+        if self.idle:
+            return block
+        target = 0.0 if self.name == "none" else self.amount
+        if self.name != self._active:
+            target = 0.0  # fade the old one out before swapping
+        wet = self._wet(block) if self._active != "none" else block
+        if self._mix != target:
+            ramp = np.linspace(self._mix, target, len(block), dtype=np.float32)[:, None]
+            block = block * (1.0 - ramp) + wet * ramp
+            self._mix = target
+        else:
+            block = block * (1.0 - self._mix) + wet * self._mix
+        if self._mix == 0.0 and self.name != self._active:
+            self._swap(self.name)
+        return block
+
+    def _swap(self, name):
+        self._active = name
+        self._zi = None
+        self._sos = None
+        self._phase = 0
+
+    def _wet(self, block):
+        if self._active == "telephone":
+            return self._telephone(block)
+        if self._active == "robot":
+            return self._robot(block)
+        if self._active == "drive":
+            return np.tanh(block * 10 ** (MIC_DRIVE_DB / 20)).astype(np.float32)
+        return block
+
+    def _telephone(self, block):
+        channels = block.shape[1]
+        if self._sos is None or channels != self._channels:
+            low, high = MIC_PHONE_BAND_HZ
+            self._sos = butter(4, [low, high], btype="band", fs=SAMPLE_RATE, output="sos")
+            self._channels = channels
+            self._zi = None
+        if self._zi is None:
+            if not len(block):
+                return block
+            # Start each section settled on the first sample, so the
+            # filter doesn't thump while it fills. (sections, 2, channels)
+            self._zi = (sosfilt_zi(self._sos)[:, :, None] * block[0]).astype(np.float32)
+        out = np.empty_like(block)
+        for ch in range(channels):
+            out[:, ch], self._zi[:, :, ch] = sosfilt(
+                self._sos, block[:, ch], zi=self._zi[:, :, ch])
+        return out
+
+    def _robot(self, block):
+        frames = len(block)
+        t = (self._phase + np.arange(frames, dtype=np.float32)) / SAMPLE_RATE
+        self._phase = (self._phase + frames) % SAMPLE_RATE
+        return (block * np.sin(2 * np.pi * MIC_ROBOT_HZ * t, dtype=np.float32)[:, None])
+
+
 class AudioEngine:
     """Continuously mixes the selected microphone with triggered sound
     clips and writes the result to the selected output device, so voice
@@ -162,6 +256,7 @@ class AudioEngine:
         self.mic_enabled = True  # False while muted or push-to-talk isn't held
         self._mic_level = 1.0  # gain applied to the last block, for smooth changes
         self.sound_gain = 1.0
+        self.mic_effects = _MicEffectChain()
         self._output_limiter = _Limiter()
         self._monitor_limiter = _Limiter()
         self.on_error = None
@@ -312,6 +407,12 @@ class AudioEngine:
                     return min(1.0, sound.position / len(sound.data))
         return None
 
+    def set_mic_effect(self, name, amount):
+        """Change the live mic effect. Takes the lock so the callback
+        never reads a half-applied change."""
+        with self._lock:
+            self.mic_effects.set(name, amount)
+
     def start_recording(self):
         """Begin keeping the raw mic blocks the input callback receives.
         Recording is taken before mute, push-to-talk and the mic volume,
@@ -375,6 +476,7 @@ class AudioEngine:
             if status:
                 self.dropouts += 1
             mixed = self._pull_mic_frames(frames, self.output_channels)
+            mixed = self.mic_effects.process(mixed)
             # Ramp gain changes over the block so muting doesn't click.
             target = self.mic_gain if self.mic_enabled else 0.0
             if target != self._mic_level:

@@ -6,6 +6,7 @@ from tkinter import messagebox
 
 import customtkinter as ctk
 
+from .audio_engine import MIC_EFFECTS
 from .config import save_config
 from .dialogs import HotkeyDialog
 from .hotkeys import (
@@ -29,6 +30,7 @@ from .theme import (
     COLOR_ROW_HOVER,
     COLOR_TEXT,
     COLOR_TEXT_DIM,
+    font,
 )
 
 
@@ -58,8 +60,29 @@ class MicHotkeyMixin:
         self.ptt_checkbox.grid(row=1, column=0, sticky="w", pady=(6, 0))
         self.ptt_hotkey_button = ctk.CTkButton(box, text="", command=self.set_ptt_hotkey, **button)
         self.ptt_hotkey_button.grid(row=1, column=1, sticky="w", padx=8, pady=(6, 0))
+        effects = ctk.CTkFrame(box, fg_color="transparent")
+        effects.grid(row=2, column=0, columnspan=2, sticky="w", pady=(6, 0))
+        ctk.CTkLabel(effects, text="Voice:", text_color=COLOR_TEXT).pack(side="left")
+        self.mic_effect_var = ctk.StringVar(value=self._mic_effect_label(self.config["mic_effect"]))
+        ctk.CTkOptionMenu(
+            effects, variable=self.mic_effect_var, width=120,
+            values=[name.capitalize() for name in MIC_EFFECTS],
+            command=self._on_mic_effect_change,
+            fg_color=COLOR_ROW, text_color=COLOR_TEXT,
+        ).pack(side="left", padx=(6, 0))
+        self.mic_effect_slider = ctk.CTkSlider(
+            effects, from_=0, to=100, number_of_steps=100, width=120,
+            command=self._on_mic_effect_amount,
+        )
+        self.mic_effect_slider.set(self.config["mic_effect_amount"])
+        self.mic_effect_slider.pack(side="left", padx=(8, 0))
+        self.mic_effect_label = ctk.CTkLabel(
+            effects, text=f"{self.config['mic_effect_amount']}%", width=42,
+            font=font("small"), text_color=COLOR_TEXT_DIM,
+        )
+        self.mic_effect_label.pack(side="left")
         self.mic_status = ctk.CTkLabel(box, text="", text_color=COLOR_TEXT_DIM, anchor="w")
-        self.mic_status.grid(row=2, column=0, columnspan=2, sticky="w", pady=(4, 0))
+        self.mic_status.grid(row=3, column=0, columnspan=2, sticky="w", pady=(4, 0))
         if self.config["mic_muted"]:
             self.mute_checkbox.select()
         if self.config["push_to_talk"]:
@@ -67,6 +90,30 @@ class MicHotkeyMixin:
         self._ptt_held = False
         self._update_mic_hotkey_buttons()
         self._update_mic_state()
+        self._apply_mic_effect()
+
+    @staticmethod
+    def _mic_effect_label(name):
+        return name.capitalize() if name in MIC_EFFECTS else "None"
+
+    def _on_mic_effect_change(self, label):
+        self.config["mic_effect"] = label.lower()
+        save_config(self.config)
+        self._apply_mic_effect()
+
+    def _on_mic_effect_amount(self, value):
+        self.config["mic_effect_amount"] = int(round(value))
+        self.mic_effect_label.configure(text=f"{self.config['mic_effect_amount']}%")
+        self._apply_mic_effect()
+        self._save_config_soon()
+
+    def _apply_mic_effect(self):
+        """What the effect does reaches the output device, which is what
+        other people hear. Monitoring plays the board's own clips, not
+        the mic, so there is nothing to change there."""
+        self.audio_engine.set_mic_effect(
+            self.config["mic_effect"], self.config["mic_effect_amount"] / 100,
+        )
 
     def _update_mic_hotkey_buttons(self):
         mute = self.config.get("mute_hotkey")

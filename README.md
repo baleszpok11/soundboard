@@ -26,6 +26,8 @@ together, from one virtual microphone.
 - Level meters under both device pickers, plus a "Test" button that sends
   a tone to the output, so you can see your routing works without asking
   someone if they can hear you
+- Voice effects on the live microphone (telephone, robot, drive) with an
+  amount slider, so what others hear can be changed while you talk
 - "Hear soundboard" toggle plays clips on your own speakers/headphones
   too — turning it off doesn't affect what others hear through the
   virtual cable
