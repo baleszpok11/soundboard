@@ -7,6 +7,7 @@ import random
 import shutil
 import sys
 import textwrap
+import threading
 import time
 import tkinter as tk
 from tkinter import filedialog
@@ -22,6 +23,8 @@ from .config import (
     ensure_sounds_dir,
     resolve_sound_path,
     same_file,
+    set_sound_loudness,
+    sound_loudness,
     sound_paths,
     sanitize_filename,
     save_config,
@@ -36,6 +39,7 @@ from .dialogs import (
     info,
     warn,
 )
+from .dsp import match_gain, measure_file
 from .theme import (
     CARD_BORDER,
     COLOR_BG,
@@ -138,6 +142,8 @@ class SoundListMixin:
         self._refresh_profile_menu()
         self._refresh_sound_list()
         self._apply_hotkeys()
+        if self.config.get("match_levels"):
+            self.measure_board()
         self.audio_engine.preload(
             resolve_sound_path(path) for s in self.sounds if s.get("enabled", True)
             for path in sound_paths(s)
@@ -514,6 +520,8 @@ class SoundListMixin:
             label="Loop", variable=self._loop_var,
             command=lambda: self._set_loop(index, self._loop_var.get()),
         )
+        menu.add_command(label="Re-measure loudness",
+                         command=lambda: self.remeasure_sound(index))
         menu.add_command(label="Rename...", command=lambda: self.rename_sound(index))
         menu.add_command(label="Add clips...", command=lambda: self.add_clips_to_group(index))
         paths = sound_paths(sound)
@@ -715,7 +723,7 @@ class SoundListMixin:
         """Import several files as board entries, writing the config and
         redrawing the list once at the end rather than per file, and
         telling the user what didn't make it instead of stopping."""
-        added, skipped, failed = 0, [], []
+        added, skipped, failed = [], [], []
         for path in paths:
             try:
                 stored_path = self._import_into_sounds_dir(path)
@@ -725,13 +733,15 @@ class SoundListMixin:
             if self._find_sound(resolve_sound_path(stored_path)) is not None:
                 skipped.append(os.path.basename(path))
                 continue
-            self.sounds.append(self._new_sound_entry(
-                os.path.splitext(os.path.basename(path))[0], stored_path))
-            added += 1
+            entry = self._new_sound_entry(
+                os.path.splitext(os.path.basename(path))[0], stored_path)
+            self.sounds.append(entry)
+            added.append(entry)
         if added:
             save_config(self.config)
             self._refresh_sound_list()
-        self._report_import(added, skipped, failed)
+            self._measure_sounds(added)
+        self._report_import(len(added), skipped, failed)
 
     def _report_import(self, added, skipped, failed):
         if not skipped and not failed:
@@ -871,6 +881,7 @@ class SoundListMixin:
         sound["paths"] = paths
         save_config(self.config)
         self._refresh_sound_list()
+        self._measure_sounds([sound])
         self.audio_engine.preload(resolve_sound_path(p) for p in paths)
 
     def remove_clip_from_group(self, index, path):
@@ -910,9 +921,11 @@ class SoundListMixin:
         return entry
 
     def _add_sound_entry(self, name, stored_path, source=None):
-        self.sounds.append(self._new_sound_entry(name, stored_path, source))
+        entry = self._new_sound_entry(name, stored_path, source)
+        self.sounds.append(entry)
         save_config(self.config)
         self._refresh_sound_list()
+        self._measure_sounds([entry])
 
     def remove_sound(self, index):
         sound = self.sounds[index]
@@ -953,6 +966,80 @@ class SoundListMixin:
                 except OSError as e:
                     error(self.root, "Could not delete file", str(e))
 
+    # -- loudness ------------------------------------------------------------
+
+    def _measure_sounds(self, entries, force=False, on_done=None):
+        """Measure the clips of these entries and remember the result on
+        them, on a worker thread: it decodes whole files, and a folder
+        import hands it a hundred at once. The config is written once at
+        the end rather than per clip.
+
+        A clip that will not decode, or that holds nothing to measure,
+        is left unmeasured and plays untouched - a board is not the
+        place to learn that a file is broken, and triggering it says so
+        already."""
+        jobs = [(sound, path) for sound in entries for path in sound_paths(sound)
+                if force or sound_loudness(sound, path) is None]
+        if not jobs:
+            if on_done is not None:
+                on_done([])
+            return
+
+        def work():
+            measured = []
+            for sound, path in jobs:
+                try:
+                    lufs = measure_file(resolve_sound_path(path))
+                except Exception:
+                    lufs = None
+                measured.append((sound, path, lufs))
+            self.root.after(0, self._store_measurements, measured, on_done)
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _store_measurements(self, measured, on_done=None):
+        """Back on the Tk thread: keep what came back. Entries removed
+        while the worker was running are written to and then dropped
+        with the rest of the entry, which costs nothing."""
+        for sound, path, lufs in measured:
+            if lufs is not None:
+                set_sound_loudness(sound, path, lufs)
+        if any(lufs is not None for _, _, lufs in measured):
+            save_config(self.config)
+        if on_done is not None:
+            on_done(measured)
+
+    def measure_board(self):
+        """Measure whatever on this board has no measurement yet. Called
+        when level matching is switched on and when a profile is opened
+        while it is on, so the switch works on boards that were built
+        before any of this existed."""
+        self._measure_sounds(self.sounds)
+
+    def remeasure_sound(self, index):
+        """Re-measure one entry, for a clip that was edited outside the
+        app. Unlike the background pass this one was asked for, so it
+        says what it found."""
+        sound = self.sounds[index]
+        self._measure_sounds([sound], force=True,
+                             on_done=lambda measured: self._report_measurement(sound, measured))
+
+    def _report_measurement(self, sound, measured):
+        lines = [f"{os.path.basename(path)}: "
+                 + (f"{lufs:.1f} LUFS" if lufs is not None else "nothing to measure")
+                 for _, path, lufs in measured]
+        info(self.root, "Measured", f"'{sound['name']}'\n\n" + "\n".join(lines))
+
+    def _clip_gain(self, sound, path):
+        """The per-sound volume, with the matching gain under it when
+        level matching is on. The volume stays a trim on top: someone
+        who has already balanced a board by hand keeps that balance."""
+        gain = sound.get("volume", 100) / 100
+        if self.config.get("match_levels"):
+            gain *= match_gain(sound_loudness(sound, path),
+                               self.config.get("reference_lufs"))
+        return gain
+
     # -- playback -----------------------------------------------------------
 
     def play_sound(self, sound):
@@ -960,9 +1047,10 @@ class SoundListMixin:
         # The key is the entry, not the file that happens to come up, so
         # stopping, looping and the playing indicator keep working for a
         # group whichever member is playing.
+        path = self._pick_clip(sound, key)
         self.audio_engine.play(
-            resolve_sound_path(self._pick_clip(sound, key)),
-            gain=sound.get("volume", 100) / 100, loop=sound.get("loop", False), key=key,
+            resolve_sound_path(path),
+            gain=self._clip_gain(sound, path), loop=sound.get("loop", False), key=key,
         )
 
     def _pick_clip(self, sound, key):

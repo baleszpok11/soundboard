@@ -173,6 +173,15 @@ def load_config():
     # Windows and macOS and falls back to light elsewhere.
     config.setdefault("appearance", "system")
     config.setdefault("skipped_version", None)
+    # Loudness matching: off by default, because a board whose clips have
+    # already been trimmed by hand would otherwise sound different the
+    # first time it is opened by a version that has this.
+    config.setdefault("match_levels", False)
+    # The measured microphone, in LUFS, or None to use dsp's default
+    # target until someone measures their voice.
+    reference = config.get("reference_lufs")
+    if not isinstance(reference, (int, float)) or isinstance(reference, bool):
+        config["reference_lufs"] = None
     _load_profiles(config)
     return config
 
@@ -215,6 +224,7 @@ def _load_sound(sound):
     sound.setdefault("loop", False)
     sound.setdefault("volume", 100)
     _load_sound_group(sound)
+    _load_sound_loudness(sound)
     return sound
 
 
@@ -232,6 +242,46 @@ def _load_sound_group(sound):
         sound["paths"] = members
     else:
         sound.pop("paths", None)
+
+
+def _load_sound_loudness(sound):
+    """Keep "loudness" a clip path -> LUFS map covering only clips this
+    entry still plays, or drop it. It is optional everywhere it is read,
+    so a board measured by a newer version still plays in an older one -
+    and an entry whose file was replaced measures again rather than
+    trusting a number taken from something else."""
+    loudness = sound.get("loudness")
+    if not isinstance(loudness, dict):
+        sound.pop("loudness", None)
+        return
+    paths = set(sound_paths(sound))
+    kept = {path: float(value) for path, value in loudness.items()
+            if path in paths and isinstance(value, (int, float))
+            and not isinstance(value, bool)}
+    if kept:
+        sound["loudness"] = kept
+    else:
+        sound.pop("loudness", None)
+
+
+def sound_loudness(sound, path):
+    """The stored measurement for one of an entry's clips, or None when
+    it has not been measured (an older board, a file added by hand)."""
+    loudness = sound.get("loudness")
+    if isinstance(loudness, dict):
+        return loudness.get(path)
+    return None
+
+
+def set_sound_loudness(sound, path, lufs):
+    """Remember a measurement, or forget one that came back empty."""
+    loudness = sound.setdefault("loudness", {})
+    if lufs is None:
+        loudness.pop(path, None)
+    else:
+        loudness[path] = float(lufs)
+    if not loudness:
+        sound.pop("loudness", None)
 
 
 def sound_paths(sound):

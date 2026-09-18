@@ -6,6 +6,7 @@ fill a block before the sound card asks again.
 """
 
 import numpy as np
+import soundfile as sf
 from scipy.signal import butter, lfilter, sosfilt
 
 from .audio_engine import _resample
@@ -295,3 +296,120 @@ def pitch_shift(data, semitones, sample_rate):
     ratio = 2 ** (semitones / 12)
     stretched = time_stretch(data, 1 / ratio)
     return _resample(stretched, sample_rate * ratio, sample_rate)
+
+
+# -- loudness ---------------------------------------------------------------
+#
+# EBU R128 integrated loudness, so a board can play every clip at one
+# perceived level. Peak would be the easy measurement and the wrong one:
+# peak is what the limiter deals with, and it is exactly what does not
+# correlate with how loud something sounds.
+
+# The two BS.1770 biquads, given as the spec's parameters rather than its
+# 48 kHz coefficient table, so a clip measures the same at any rate.
+K_SHELF_HZ = 1681.974450955533
+K_SHELF_Q = 0.7071752369554196
+K_SHELF_DB = 3.999843853973347
+K_SHELF_VB_EXP = 0.499666774155
+K_HIGHPASS_HZ = 38.13547087602444
+K_HIGHPASS_Q = 0.5003270373238773
+
+LOUDNESS_BLOCK_S = 0.4
+LOUDNESS_OVERLAP = 4  # 400 ms blocks every 100 ms, the spec's step
+LOUDNESS_OFFSET = -0.691  # the spec's constant, which puts LUFS on the dBFS scale
+ABSOLUTE_GATE_LUFS = -70.0  # silence, and the room tone either side of speech
+RELATIVE_GATE_DB = -10.0  # everything this far under the ungated mean drops out
+
+# Where a clip lands when the microphone has not been measured. Broadcast
+# would use -23; a voice chat runs hotter, and this is about where a
+# headset mic at a sane gain sits.
+LOUDNESS_TARGET_LUFS = -16.0
+# The two limits are not the same number, because the two mistakes are
+# not the same. A clip with almost nothing in it would ask for 40 dB of
+# boost and arrive as amplified hiss, so boosting stops here. Cutting
+# only makes something quieter, and a clip mastered at -8 LUFS really
+# does need 20 dB off to meet a voice at -28, so the cut is loose enough
+# never to be the reason matching did not work.
+MATCH_BOOST_LIMIT_DB = 12.0
+MATCH_CUT_LIMIT_DB = 30.0
+
+
+def _k_weighting_sos(sample_rate):
+    """K-weighting: a high shelf for the head's own response, then a
+    high-pass that throws away the rumble no one hears as loudness."""
+    k = np.tan(np.pi * K_SHELF_HZ / sample_rate)
+    vh = 10 ** (K_SHELF_DB / 20)
+    vb = vh ** K_SHELF_VB_EXP
+    den = 1 + k / K_SHELF_Q + k * k
+    shelf = [
+        (vh + vb * k / K_SHELF_Q + k * k) / den,
+        2 * (k * k - vh) / den,
+        (vh - vb * k / K_SHELF_Q + k * k) / den,
+        1.0,
+        2 * (k * k - 1) / den,
+        (1 - k / K_SHELF_Q + k * k) / den,
+    ]
+    k = np.tan(np.pi * K_HIGHPASS_HZ / sample_rate)
+    den = 1 + k / K_HIGHPASS_Q + k * k
+    highpass = [
+        1.0, -2.0, 1.0,
+        1.0,
+        2 * (k * k - 1) / den,
+        (1 - k / K_HIGHPASS_Q + k * k) / den,
+    ]
+    return np.array([shelf, highpass], dtype=np.float64)
+
+
+def measure_loudness(data, sample_rate):
+    """Integrated loudness in LUFS, or None when there is nothing to
+    measure: silence, or a clip shorter than one 400 ms block."""
+    data = np.asarray(data, dtype=np.float64)
+    if data.ndim == 1:
+        data = data[:, None]
+    if data.shape[1] == 1:
+        # The engine repeats a mono clip into both output channels, which
+        # is 3 dB louder than the same waveform stored as stereo. Measure
+        # what will be heard rather than what is in the file, or every
+        # mono clip on the board lands 3 dB hot.
+        data = np.repeat(data, 2, axis=1)
+    block = int(round(LOUDNESS_BLOCK_S * sample_rate))
+    if block < 1 or len(data) < block:
+        return None
+
+    weighted = sosfilt(_k_weighting_sos(sample_rate), data, axis=0)
+    # Mean square per block, summed across channels (the spec's weights
+    # are 1 for left and right, and this app never sees surround).
+    running = np.concatenate([[0.0], np.cumsum((weighted ** 2).sum(axis=1))])
+    starts = np.arange(0, len(data) - block + 1, max(1, block // LOUDNESS_OVERLAP))
+    power = (running[starts + block] - running[starts]) / block
+
+    with np.errstate(divide="ignore"):
+        levels = LOUDNESS_OFFSET + 10 * np.log10(power)
+    heard = power[levels > ABSOLUTE_GATE_LUFS]
+    if not len(heard):
+        return None
+    # The relative gate: measure the loud part of the clip, not the mean
+    # of speech and the pauses between it.
+    gate = LOUDNESS_OFFSET + 10 * np.log10(heard.mean()) + RELATIVE_GATE_DB
+    kept = heard[LOUDNESS_OFFSET + 10 * np.log10(heard) > gate]
+    if not len(kept):
+        return None
+    return float(LOUDNESS_OFFSET + 10 * np.log10(kept.mean()))
+
+
+def measure_file(path):
+    """Integrated loudness of an audio file, or None when it holds
+    nothing measurable. Raises whatever the decoder raises."""
+    data, sample_rate = sf.read(path, dtype="float32", always_2d=True)
+    return measure_loudness(data, sample_rate)
+
+
+def match_gain(clip_lufs, reference_lufs=None):
+    """The factor that brings a measured clip to the reference level -
+    the measured microphone, or the default target when there is none.
+    An unmeasured clip plays untouched."""
+    if clip_lufs is None:
+        return 1.0
+    target = LOUDNESS_TARGET_LUFS if reference_lufs is None else reference_lufs
+    db = max(-MATCH_CUT_LIMIT_DB, min(MATCH_BOOST_LIMIT_DB, target - clip_lufs))
+    return float(10 ** (db / 20))
