@@ -28,6 +28,7 @@ from .config import (
     ensure_sounds_dir,
     resolve_sound_path,
     sanitize_filename,
+    sound_paths,
     unique_path,
 )
 from .theme import (
@@ -349,11 +350,15 @@ class EditorMixin:
         self._editor_sound_paths = {}
         names = []
         for sound in self.sounds:
-            label = sound["name"]
-            while label in self._editor_sound_paths:
-                label = f"{label} ({sound['path']})"
-            self._editor_sound_paths[label] = resolve_sound_path(sound["path"])
-            names.append(label)
+            # Every clip of a random group is editable on its own, so the
+            # one take that came out too quiet can be fixed.
+            paths = sound_paths(sound)
+            for path in paths:
+                label = sound["name"] if len(paths) == 1 else f"{sound['name']} ({path})"
+                while label in self._editor_sound_paths:
+                    label = f"{label} ({path})"
+                self._editor_sound_paths[label] = resolve_sound_path(path)
+                names.append(label)
         self.editor_sound_menu.configure(values=names or [EDITOR_PLACEHOLDER])
         # Keep showing what's loaded (it may be a browsed file that isn't on
         # the board, or a sound that was just removed).

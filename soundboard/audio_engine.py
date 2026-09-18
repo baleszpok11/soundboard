@@ -419,25 +419,28 @@ class AudioEngine:
             if self.monitor_stream is not None and not self.monitor_muted:
                 self._active_sounds_monitor.append(_ActiveSound(monitor_data, key, gain, loop))
 
-    def play(self, path, gain=1.0, loop=False):
+    def play(self, path, gain=1.0, loop=False, key=None):
         """Queue a file for playback without blocking the caller. Errors
-        are reported through on_error."""
-        self._requests.put((path, gain, True, loop))
+        are reported through on_error. `key` identifies what is playing
+        for stopping and restarting; it defaults to the file, which a
+        board entry that can play several files overrides so all of them
+        answer to the one entry."""
+        self._requests.put((path, gain, True, loop, key))
 
     def preload(self, paths):
         """Decode files into the cache in the background."""
         for path in paths:
-            self._requests.put((path, 1.0, False, False))
+            self._requests.put((path, 1.0, False, False, None))
 
     def _worker(self):
         while True:
-            path, gain, play, loop = self._requests.get()
+            path, gain, play, loop, key = self._requests.get()
             try:
                 if play and self.output_stream is None and self.monitor_stream is None:
                     raise RuntimeError("No output device selected.")
                 data = self._load_clip(path)
                 if play:
-                    self._queue_clip(data, os.path.abspath(path), gain, loop)
+                    self._queue_clip(data, key or os.path.abspath(path), gain, loop)
             except FileNotFoundError:
                 if play and self.on_error is not None:
                     self.on_error(f"File not found: {path}")

@@ -7,7 +7,9 @@ redistributed.
 
 Only sounds with a source can travel. Anything added from disk, and
 anything the Sound Editor produced, stays behind - it has no link to
-rebuild it from.
+rebuild it from. A random group is a list of files with one link between
+them, so it travels as the clip that link fetches, and the export says
+so rather than pretending the group made it across.
 """
 
 import json
@@ -33,21 +35,25 @@ def export_sound(sound):
 
 
 def build(profiles, app_version=None):
-    """A board file for these {name, sounds} profiles, plus the sounds
-    left out because nothing could rebuild them."""
-    exported, skipped = [], []
+    """A board file for these {name, sounds} profiles, the sounds left
+    out because nothing could rebuild them, and the groups travelling as
+    a single clip."""
+    exported, skipped, partial = [], [], []
     for profile in profiles:
         sounds = []
         for sound in profile["sounds"]:
             if is_shareable(sound):
                 sounds.append(export_sound(sound))
+                extra = len(sound.get("paths") or []) - 1
+                if extra > 0:
+                    partial.append((profile["name"], sound.get("name", "?"), extra))
             else:
                 skipped.append((profile["name"], sound.get("name", "?")))
         exported.append({"name": profile["name"], "sounds": sounds})
     data = {FORMAT_KEY: FORMAT_VERSION, "profiles": exported}
     if app_version:
         data["app_version"] = app_version
-    return data, skipped
+    return data, skipped, partial
 
 
 def parse(text):
