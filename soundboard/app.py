@@ -43,6 +43,7 @@ from .theme import (
     font,
     register_tk,
     set_appearance,
+    wrap_to_width,
 )
 from . import updater
 from .tray import TrayMixin
@@ -171,9 +172,10 @@ class Soundboard(DeviceMixin, MicHotkeyMixin, SoundListMixin, DownloadMixin, Edi
         warning_holder = tk.Frame(board_tab, height=1)
         register_tk(warning_holder, bg=COLOR_BG)
         warning_holder.pack(fill="x")
-        self.loop_warning = ctk.CTkLabel(
-            warning_holder, text="", text_color=COLOR_ERROR_TEXT, justify="left", anchor="w", wraplength=800,
-        )
+        self.loop_warning = wrap_to_width(ctk.CTkLabel(
+            warning_holder, text="", text_color=COLOR_ERROR_TEXT,
+            justify="left", anchor="w",
+        ))
         self._build_permission_warning(warning_holder)
         # The controls are packed before the list although they sit below
         # it: the list is the expanding child, and whatever is packed after

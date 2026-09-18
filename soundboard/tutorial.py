@@ -96,12 +96,12 @@ PAGES = {
          "Virtual mic output to CABLE Input. " + _BOTH_ENDS),
         ("shot", "devices-windows", "What the two dropdowns should say."),
         ("step", "Check it before you go live", _CHECK),
-        ("shot", "test", "The output meter moves while the tone plays."),
+        ("shot", "test-windows", "The output meter moves while the tone plays."),
         ("step", "Tell Discord to listen to the cable",
          "In Discord, open Settings, then Voice & Video, and set Input "
          "Device to CABLE Output. Leave Output Device as your headphones."),
         ("warn", _FEEDBACK),
-        ("shot", "feedback", "The warning Soundboard shows when it spots it."),
+        ("shot", "feedback-windows", "The warning Soundboard shows when it spots it."),
         ("text",
          "Tick Hear soundboard if you want to hear your own clips on your "
          "headphones. Games with their own push-to-talk only send sound "
@@ -124,12 +124,12 @@ PAGES = {
          "Privacy & Security, Microphone. Global hotkeys need Input "
          "Monitoring in the same place."),
         ("step", "Check it before you go live", _CHECK),
-        ("shot", "test", "The output meter moves while the tone plays."),
+        ("shot", "test-macos", "The output meter moves while the tone plays."),
         ("step", "Tell Discord to listen to the cable",
          "In Discord, open Settings, then Voice & Video, and set Input "
          "Device to BlackHole 2ch. Leave Output Device as your headphones."),
         ("warn", _FEEDBACK),
-        ("shot", "feedback", "The warning Soundboard shows when it spots it."),
+        ("shot", "feedback-macos", "The warning Soundboard shows when it spots it."),
     ],
     LINUX: [
         ("text",
@@ -164,12 +164,12 @@ PAGES = {
          "Soundboard's stream to your real microphone. pavucontrol "
          "remembers both for next time."),
         ("step", "Check it before you go live", _CHECK),
-        ("shot", "test", "The output meter moves while the tone plays."),
+        ("shot", "test-linux", "The output meter moves while the tone plays."),
         ("step", "Tell Discord to listen to the cable",
          "In Discord, set Input Device to Soundboard_Mic. Leave Output "
          "Device as your headphones."),
         ("warn", _FEEDBACK),
-        ("shot", "feedback", "The warning Soundboard shows when it spots it."),
+        ("shot", "feedback-linux", "The warning Soundboard shows when it spots it."),
         ("text",
          "Hear soundboard often does not work here, because its stream can "
          "end up routed into Soundboard as well. Leave it off if it "

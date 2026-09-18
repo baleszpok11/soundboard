@@ -342,6 +342,26 @@ def set_appearance(mode):
     return mode
 
 
+def wrap_to_width(label, margin=24):
+    """Keep a label wrapping at the width it actually has.
+
+    A fixed wraplength is a guess about the window: set it wider than the
+    label ever gets and the text runs past the edge and is cut off, which
+    is what happens to every full-width label in a window narrower than
+    the guess. The app's minimum is 640, so 800 was never safe. Binding
+    to the parent's <Configure> costs nothing and is always right.
+    """
+    def resize(event):
+        width = event.width - margin
+        if width > 80 and label.cget("wraplength") != width:
+            label.configure(wraplength=width)
+
+    # add="+" so this does not displace a binding the parent already has;
+    # CTkScrollableFrame keeps its scrollregion up to date this way.
+    label.master.bind("<Configure>", resize, add="+")
+    return label
+
+
 def apply_theme(mode="system"):
     """Point CustomTkinter's defaults at this platform's metrics, then set
     the appearance mode. Call once, after the root window exists and
