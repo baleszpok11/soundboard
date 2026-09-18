@@ -176,6 +176,7 @@ class Soundboard(DeviceMixin, MicHotkeyMixin, SoundListMixin, DownloadMixin, Edi
             warning_holder, text="", text_color=COLOR_ERROR_TEXT,
             justify="left", anchor="w",
         ))
+        self._build_cable_warning(warning_holder)
         self._build_permission_warning(warning_holder)
         # The controls are packed before the list although they sit below
         # it: the list is the expanding child, and whatever is packed after
