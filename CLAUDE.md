@@ -7,7 +7,8 @@ virtual audio cable.
 - `main.py` - entry point only (startup, error dialogs), at the repo root
 - `soundboard/` - everything else, imported with relative imports
   - `app.py` - the `Soundboard` window, built from mixins: `devices.py`,
-    `mic_hotkeys.py`, `sound_list.py`, `download_tab.py`, `editor_tab.py`
+    `mic_hotkeys.py`, `sound_list.py`, `download_tab.py`, `editor_tab.py`,
+    `tts_tab.py`
   - Support modules: `audio_engine.py`, `dsp.py` (offline clip processing
     for the editor: filters, phase vocoder), `hotkeys.py` (listener and
     platform quirks), `dialogs.py`, `downloader.py` (yt-dlp), `config.py`,
@@ -92,6 +93,14 @@ virtual audio cable.
   causes itself, so a window moved between monitors of different DPI is
   resized from a size that belonged to the other screen. A fit to the
   current monitor's work area runs after the move as a backstop
+- Speech: speech.py wraps pyttsx3, which drives SAPI5, NSSpeech or
+  eSpeak - offline, nothing paid. Every call builds its own engine with
+  pyttsx3.Engine() rather than pyttsx3.init(), which caches one engine
+  per driver: share it between the Tk thread that lists voices and the
+  worker thread that speaks and its run loop stalls, so the line is
+  never spoken. A machine with no engine (a bare Linux without eSpeak)
+  is normal - the tab says so instead of failing at the button. Like
+  pynput, the driver is a runtime import, so each build names its own
 - Errors: Tk callback errors and startup failures show a dialog and append
   to soundboard_error.log; config writes are atomic
 - Sharing: board_file.py reads/writes .sbboard files (links, not audio);

@@ -60,7 +60,7 @@ jobs:
         # sees it; name it here or the build dies on the first hotkey.
         # icon.ico travels as data as well as being the exe's icon: the
         # windows themselves are given it at runtime with iconbitmap().
-        run: pyinstaller --onefile --windowed --icon assets/icon.ico --add-data "assets/icon.png;assets" --add-data "assets/icon.ico;assets" --add-data "assets/tutorial;assets/tutorial" --collect-data customtkinter --hidden-import PIL._tkinter_finder --collect-all yt_dlp --collect-all imageio_ffmpeg --collect-all pystray --name soundboard --hidden-import pynput.keyboard._win32 --hidden-import pynput.mouse._win32 main.py
+        run: pyinstaller --onefile --windowed --icon assets/icon.ico --add-data "assets/icon.png;assets" --add-data "assets/icon.ico;assets" --add-data "assets/tutorial;assets/tutorial" --collect-data customtkinter --hidden-import PIL._tkinter_finder --collect-all yt_dlp --collect-all imageio_ffmpeg --collect-all pystray --name soundboard --hidden-import pynput.keyboard._win32 --hidden-import pynput.mouse._win32 --hidden-import pyttsx3.drivers.sapi5 --collect-all comtypes main.py
 
       - name: Build executable (macOS)
         if: runner.os == 'macOS'
@@ -69,7 +69,7 @@ jobs:
           # granted Input Monitoring.
           # pynput imports its backend by name at runtime, so PyInstaller never
           # sees it; name it here or the build dies on the first hotkey.
-          pyinstaller --onedir --windowed --icon assets/icon.icns --add-data "assets/icon.png:assets" --add-data "assets/tutorial:assets/tutorial" --collect-data customtkinter --hidden-import PIL._tkinter_finder --collect-all yt_dlp --collect-all imageio_ffmpeg --collect-all pystray --name soundboard --hidden-import pynput.keyboard._darwin --hidden-import pynput.mouse._darwin main.py
+          pyinstaller --onedir --windowed --icon assets/icon.icns --add-data "assets/icon.png:assets" --add-data "assets/tutorial:assets/tutorial" --collect-data customtkinter --hidden-import PIL._tkinter_finder --collect-all yt_dlp --collect-all imageio_ffmpeg --collect-all pystray --name soundboard --hidden-import pynput.keyboard._darwin --hidden-import pynput.mouse._darwin --hidden-import pyttsx3.drivers.nsss main.py
           plutil -insert NSMicrophoneUsageDescription -string "Soundboard mixes your microphone with sound clips and sends them to your virtual audio cable." dist/soundboard.app/Contents/Info.plist
           codesign --force --deep -s - dist/soundboard.app
 
@@ -77,7 +77,7 @@ jobs:
         if: runner.os == 'Linux'
         # pynput imports its backend by name at runtime, so PyInstaller never
         # sees it; name it here or the build dies on the first hotkey.
-        run: pyinstaller --onefile --windowed --add-data "assets/icon.png:assets" --add-data "assets/tutorial:assets/tutorial" --collect-data customtkinter --hidden-import PIL._tkinter_finder --collect-all yt_dlp --collect-all imageio_ffmpeg --collect-all pystray --name soundboard --hidden-import pynput.keyboard._xorg --hidden-import pynput.mouse._xorg main.py
+        run: pyinstaller --onefile --windowed --add-data "assets/icon.png:assets" --add-data "assets/tutorial:assets/tutorial" --collect-data customtkinter --hidden-import PIL._tkinter_finder --collect-all yt_dlp --collect-all imageio_ffmpeg --collect-all pystray --name soundboard --hidden-import pynput.keyboard._xorg --hidden-import pynput.mouse._xorg --hidden-import pyttsx3.drivers.espeak main.py
 
       - name: Package (Windows)
         if: runner.os == 'Windows'

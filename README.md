@@ -43,6 +43,9 @@ together, from one virtual microphone.
 - **Download** tab: grab audio from YouTube, TikTok, Instagram and other
   sites (via yt-dlp) as MP3, straight into your board, with progress,
   cancel, and optional start/end times
+- **Speak** tab: type a line and send it through the soundboard in a
+  voice the system already has, and keep it as a clip if it's worth a
+  hotkey (offline, no paid service)
 - **Sound Editor** tab: trim a clip's start/end, boost or cut bass, set
   volume or normalize, fade in/out, change pitch and speed independently
   of each other, choose whether loud edits stay clean or clip, and pile

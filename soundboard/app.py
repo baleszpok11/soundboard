@@ -23,6 +23,7 @@ from .download_tab import DownloadMixin
 from .editor_tab import EditorMixin
 from .mic_hotkeys import MicHotkeyMixin
 from .share_tab import ShareMixin
+from .tts_tab import SpeechMixin
 from .sound_list import SoundListMixin
 from .theme import (
     COLOR_BG,
@@ -50,7 +51,7 @@ from .tutorial import TutorialWindow
 
 
 class Soundboard(DeviceMixin, MicHotkeyMixin, SoundListMixin, DownloadMixin, EditorMixin,
-                 ShareMixin, TrayMixin):
+                 ShareMixin, SpeechMixin, TrayMixin):
     def __init__(self, root):
         self.root = root
         self.root.title("Soundboard")
@@ -162,8 +163,9 @@ class Soundboard(DeviceMixin, MicHotkeyMixin, SoundListMixin, DownloadMixin, Edi
         board_tab = self.tabview.add("Soundboard")
         download_tab = self.tabview.add("Download")
         editor_tab = self.tabview.add("Sound Editor")
+        tts_tab = self.tabview.add("Speak")
         share_tab = self.tabview.add("Import / Export")
-        for tab in (board_tab, download_tab, editor_tab, share_tab):
+        for tab in (board_tab, download_tab, editor_tab, tts_tab, share_tab):
             tab.configure(fg_color=COLOR_BG)
 
         self._build_device_selectors(board_tab)
@@ -187,6 +189,7 @@ class Soundboard(DeviceMixin, MicHotkeyMixin, SoundListMixin, DownloadMixin, Edi
 
         self._build_download_tab(download_tab)
         self._build_editor_tab(editor_tab)
+        self._build_tts_tab(tts_tab)
         self._build_share_tab(share_tab)
 
         self._restart_audio_engine()
