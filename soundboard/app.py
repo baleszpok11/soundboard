@@ -49,6 +49,11 @@ from . import updater
 from .tray import TrayMixin
 from .tutorial import TutorialWindow
 
+# Words, not a chevron: the tab strip and the buttons around this one are
+# text, and a glyph here would be the only one in the window.
+SETTINGS_SHOW = "Settings"
+SETTINGS_HIDE = "Settings (hide)"
+
 
 class Soundboard(DeviceMixin, MicHotkeyMixin, SoundListMixin, DownloadMixin, EditorMixin,
                  ShareMixin, SpeechMixin, TrayMixin):
@@ -165,10 +170,13 @@ class Soundboard(DeviceMixin, MicHotkeyMixin, SoundListMixin, DownloadMixin, Edi
         editor_tab = self.tabview.add("Sound Editor")
         tts_tab = self.tabview.add("Speak")
         share_tab = self.tabview.add("Import / Export")
-        for tab in (board_tab, download_tab, editor_tab, tts_tab, share_tab):
+        self.settings_tab = self.tabview.add("Settings")
+        for tab in (board_tab, download_tab, editor_tab, tts_tab,
+                    share_tab, self.settings_tab):
             tab.configure(fg_color=COLOR_BG)
+        self.tabview.configure(command=self._place_settings_panel)
 
-        self._build_device_selectors(board_tab)
+        self._build_settings(board_tab)
         # Holder stays packed so the warning can appear above the sound list.
         warning_holder = tk.Frame(board_tab, height=1)
         register_tk(warning_holder, bg=COLOR_BG)
@@ -200,6 +208,52 @@ class Soundboard(DeviceMixin, MicHotkeyMixin, SoundListMixin, DownloadMixin, Edi
         )
         if self.config["close_to_tray"]:
             self._start_tray()
+
+    def _build_settings(self, board_tab):
+        """The settings live in their own tab, and the Soundboard tab can
+        open the same panel under a button rather than always wearing it.
+
+        There is one panel, not two: a Tk widget has a single parent and
+        cannot be reparented, so a second copy would be a second set of
+        meters, device menus and hotkey buttons, and only one of them
+        would be kept up to date. The panel is parented to the window -
+        an ancestor of both homes - and shown in one or the other with
+        pack(in_=...).
+        """
+        self.settings_open = False
+        self.settings_button = ctk.CTkButton(
+            board_tab, text=SETTINGS_SHOW, command=self._toggle_settings,
+            anchor="w", fg_color=COLOR_ROW, hover_color=COLOR_ROW_HOVER,
+            text_color=COLOR_TEXT, border_width=1, border_color=COLOR_BORDER,
+        )
+        self.settings_button.pack(fill="x", padx=2, pady=(2, 0))
+        # An empty holder, packed now, so the panel opens between the
+        # button and the sound list however late it is first shown.
+        self.settings_holder = tk.Frame(board_tab, height=0)
+        register_tk(self.settings_holder, bg=COLOR_BG)
+        self.settings_holder.pack(fill="x")
+        self.settings_panel = self._build_device_selectors(self.root)
+        self._place_settings_panel()
+
+    def _toggle_settings(self):
+        self.settings_open = not self.settings_open
+        self.settings_button.configure(
+            text=SETTINGS_HIDE if self.settings_open else SETTINGS_SHOW)
+        self._place_settings_panel()
+
+    def _place_settings_panel(self, *_):
+        """Show the panel in whichever home should have it: its own tab
+        while that tab is open, the Soundboard tab while the disclosure
+        is open, and nowhere otherwise."""
+        panel = getattr(self, "settings_panel", None)
+        if panel is None:
+            return  # a tab change during startup, before the panel exists
+        on_settings_tab = self.tabview.get() == "Settings"
+        panel.pack_forget()
+        if on_settings_tab:
+            panel.pack(in_=self.settings_tab, fill="x", padx=2, pady=(2, GAP))
+        elif self.settings_open:
+            panel.pack(in_=self.settings_holder, fill="x", padx=2, pady=(2, GAP))
 
     def _build_appearance_controls(self, frame, row):
         """Light/dark, or follow the OS. "System" is the default and is

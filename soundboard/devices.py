@@ -152,11 +152,15 @@ class DeviceMixin:
     # -- device selection UI -------------------------------------------------
 
     def _build_device_selectors(self, parent):
+        """Build the settings panel. It is not placed here: it has two
+        homes, its own tab and a disclosure on the Soundboard tab, and
+        app._place_settings_panel decides which one is showing. `parent`
+        must be an ancestor of both, since a Tk widget cannot be
+        reparented and this one is shown with pack(in_=...)."""
         frame = ctk.CTkFrame(
             parent, fg_color=COLOR_SURFACE,
             border_width=CARD_BORDER, border_color=COLOR_BORDER,
         )
-        frame.pack(fill="x", padx=2, pady=(2, GAP))
         frame.grid_columnconfigure(1, weight=1)
 
         ctk.CTkLabel(frame, text="Microphone (input):", text_color=COLOR_TEXT_DIM, font=font("small_bold")).grid(
@@ -230,6 +234,7 @@ class DeviceMixin:
         self._build_mic_controls(frame, 4)
         self._build_startup_controls(frame, 5)
         self._build_appearance_controls(frame, 6)
+        return frame
 
     def _build_cable_warning(self, parent):
         """Hidden until _update_device_warnings finds no virtual cable.
