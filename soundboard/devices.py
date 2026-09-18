@@ -11,6 +11,7 @@ import customtkinter as ctk
 
 from .audio_engine import SAMPLE_RATE, sd, test_tone
 from .config import save_config
+from .dsp import LOUDNESS_TARGET_LUFS, measure_loudness
 from .theme import (
     CARD_BORDER,
     COLOR_BG,
@@ -31,6 +32,8 @@ from .theme import (
 )
 
 NO_DEVICE_LABEL = "(none)"
+MEASURE_VOICE = "Measure my voice"
+MEASURE_VOICE_S = 5  # long enough for a sentence, short enough to sit through
 METER_POLL_MS = 50
 METER_DECAY = 0.08  # how far a meter falls per tick when the signal drops
 METER_HOT = 0.95  # at or above this the meter turns red
@@ -57,7 +60,7 @@ CABLE_INSTALL = {
 
 class DeviceMixin:
     """Device selection and stream health. Expects `config`, `audio_engine`
-    and `root` from Soundboard."""
+    and `root` from Soundboard, and `measure_board` from SoundListMixin."""
 
     # -- device listing -----------------------------------------------------
 
@@ -231,10 +234,89 @@ class DeviceMixin:
 
         self._add_volume_row(frame, 2, "Mic volume:", "mic_volume", "mic_gain")
         self._add_volume_row(frame, 3, "Soundboard volume:", "sound_volume", "sound_gain")
-        self._build_mic_controls(frame, 4)
-        self._build_startup_controls(frame, 5)
-        self._build_appearance_controls(frame, 6)
+        self._build_match_controls(frame, 4)
+        self._build_mic_controls(frame, 5)
+        self._build_startup_controls(frame, 6)
+        self._build_appearance_controls(frame, 7)
         return frame
+
+    def _build_match_controls(self, frame, row):
+        """Loudness matching: one switch for the board, and a button that
+        measures the voice it should match. Off by default - a board
+        someone has already balanced by hand would otherwise sound
+        different the first time they open this version."""
+        ctk.CTkLabel(frame, text="Levels:", text_color=COLOR_TEXT_DIM,
+                     font=font("small_bold")).grid(
+            row=row, column=0, sticky="w", padx=8, pady=6)
+        box = ctk.CTkFrame(frame, fg_color="transparent")
+        box.grid(row=row, column=1, columnspan=2, sticky="ew", padx=8, pady=6)
+        self.match_checkbox = ctk.CTkCheckBox(
+            box, text="Match clip levels", command=self._on_toggle_match,
+            fg_color=COLOR_ORANGE, hover_color=COLOR_ORANGE_HOVER,
+            checkmark_color=COLOR_ON_ACCENT, text_color=COLOR_TEXT,
+        )
+        if self.config.get("match_levels"):
+            self.match_checkbox.select()
+        self.match_checkbox.grid(row=0, column=0, sticky="w")
+        self.match_button = ctk.CTkButton(
+            box, text=MEASURE_VOICE, width=140, command=self.measure_voice,
+            fg_color=COLOR_ROW, hover_color=COLOR_ROW_HOVER, text_color=COLOR_TEXT,
+            border_width=1, border_color=COLOR_BORDER,
+        )
+        self.match_button.grid(row=0, column=1, sticky="w", padx=8)
+        self.match_status = ctk.CTkLabel(
+            box, text="", text_color=COLOR_TEXT_DIM, font=font("small"), anchor="w")
+        self.match_status.grid(row=1, column=0, columnspan=2, sticky="w", pady=(4, 0))
+        self._update_match_status()
+
+    def _update_match_status(self):
+        reference = self.config.get("reference_lufs")
+        if reference is None:
+            text = (f"Clips play at {LOUDNESS_TARGET_LUFS:.0f} LUFS. "
+                    "Measure your voice to match them to it instead.")
+        else:
+            text = f"Matching clips to your voice, measured at {reference:.1f} LUFS."
+        self.match_status.configure(text=text)
+
+    def _on_toggle_match(self):
+        on = bool(self.match_checkbox.get())
+        self.config["match_levels"] = on
+        save_config(self.config)
+        if on:
+            # Boards built before any of this have no measurements, so
+            # the switch would do nothing until something was added.
+            self.measure_board()
+
+    def measure_voice(self):
+        """Record a few seconds of the microphone and measure it, so
+        clips land at the level of the voice they are mixed with rather
+        than at an arbitrary target. The recording is taken before mute
+        and push-to-talk, so neither has to be off to do this."""
+        if getattr(self, "_measuring_voice", False):
+            return
+        if not self.audio_engine.start_recording():
+            error(self.root, "No microphone",
+                  "Choose a microphone before measuring your voice.")
+            return
+        self._measuring_voice = True
+        self._count_down_voice(MEASURE_VOICE_S)
+
+    def _count_down_voice(self, left):
+        if left > 0:
+            self.match_button.configure(text=f"Listening... {left}", state="disabled")
+            self.root.after(1000, self._count_down_voice, left - 1)
+            return
+        self.match_button.configure(text=MEASURE_VOICE, state="normal")
+        self._measuring_voice = False
+        data = self.audio_engine.stop_recording()
+        reference = None if data is None else measure_loudness(data, SAMPLE_RATE)
+        if reference is None:
+            error(self.root, "Nothing to measure",
+                  "That was too quiet to measure. Check the microphone and try again.")
+            return
+        self.config["reference_lufs"] = reference
+        save_config(self.config)
+        self._update_match_status()
 
     def _build_cable_warning(self, parent):
         """Hidden until _update_device_warnings finds no virtual cable.

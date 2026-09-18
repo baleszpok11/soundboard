@@ -101,6 +101,18 @@ virtual audio cable.
   never spoken. A machine with no engine (a bare Linux without eSpeak)
   is normal - the tab says so instead of failing at the button. Like
   pynput, the driver is a runtime import, so each build names its own
+- Loudness: dsp.measure_loudness() is EBU R128 (K-weighting, 400 ms
+  blocks, both gates), built from the spec's parameters rather than its
+  48 kHz coefficient table so a clip measures the same at any rate. A
+  mono clip is measured expanded to stereo, because that is how
+  _match_channels plays it. Every clip is measured on a worker thread
+  when it joins the board and the result is stored per clip under the
+  entry's optional "loudness"; playback only multiplies by match_gain(),
+  under the per-sound volume, and only while config "match_levels" is
+  on. The gain limits are asymmetric on purpose: boosting stops at 12 dB
+  because past that a quiet clip is amplified hiss, cutting runs to 30
+  because a cut only makes something quieter. config "reference_lufs" is
+  the measured microphone; with none, clips land at LOUDNESS_TARGET_LUFS
 - Errors: Tk callback errors and startup failures show a dialog and append
   to soundboard_error.log; config writes are atomic
 - Sharing: board_file.py reads/writes .sbboard files (links, not audio);

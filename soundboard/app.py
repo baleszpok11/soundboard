@@ -206,6 +206,12 @@ class Soundboard(DeviceMixin, MicHotkeyMixin, SoundListMixin, DownloadMixin, Edi
         self.audio_engine.preload(
             resolve_sound_path(s["path"]) for s in self.sounds if s.get("enabled", True)
         )
+        if self.config.get("match_levels"):
+            # Anything that arrived without a measurement - a board built
+            # by an older version, a file that would not decode last time
+            # - would otherwise never be matched, since measuring only
+            # happens when a sound is added.
+            self.measure_board()
         if self.config["close_to_tray"]:
             self._start_tray()
 

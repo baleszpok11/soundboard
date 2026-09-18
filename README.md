@@ -40,6 +40,9 @@ together, from one virtual microphone.
 - "Stop all" button and optional hotkey
 - Volume sliders for the mic, the whole soundboard, and each sound, plus
   a limiter so loud moments get quieter instead of distorting
+- **Match clip levels:** measures every clip against EBU R128 and plays
+  the whole board at one perceived level, so a quiet clip and a loud one
+  arrive the same. Measure your voice and clips land at its level
 - **Download** tab: grab audio from YouTube, TikTok, Instagram and other
   sites (via yt-dlp) as MP3, straight into your board, with progress,
   cancel, and optional start/end times
@@ -210,6 +213,16 @@ button on the Soundboard tab, so the board itself keeps the window.
   triggered. Only clips are sent there, not your mic. If the virtual mic
   output is itself your default output (e.g. no virtual cable installed),
   you'll hear the main mix regardless of this setting.
+- **Match clip levels:** off until you switch it on. Every clip is
+  measured when it joins the board - imported, recorded, downloaded,
+  spoken or saved from the editor - and matching plays them all at one
+  perceived level instead of at whatever each file was mastered at. Each
+  sound's own volume stays a trim on top, so a board you have already
+  balanced by hand keeps its balance.
+  **Measure my voice** listens for five seconds and matches clips to the
+  voice they are mixed with; without it they land at -16 LUFS. A clip
+  edited outside Soundboard can be measured again from **More >
+  Re-measure loudness**.
 - "Add sound" to pick an audio file (wav, flac, ogg, mp3); it's copied
   into the `Sounds/` folder.
 - The checkbox next to each sound toggles it on/off — unchecked sounds
