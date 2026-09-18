@@ -3,14 +3,18 @@ below it, plus adding, removing and playing sounds."""
 
 import filecmp
 import os
+import random
 import shutil
 import sys
 import textwrap
+import time
 import tkinter as tk
 from tkinter import filedialog, messagebox
 
 import customtkinter as ctk
+import soundfile as sf
 
+from .audio_engine import RECORD_MAX_S, SAMPLE_RATE
 from .config import (
     NEW_SOUND_VOLUME,
     SOUNDS_DIR,
@@ -18,6 +22,7 @@ from .config import (
     ensure_sounds_dir,
     resolve_sound_path,
     same_file,
+    sound_paths,
     sanitize_filename,
     save_config,
     unique_path,
@@ -47,6 +52,15 @@ from .theme import (
 )
 
 PLAYING_POLL_MS = 100  # how often the board re-reads what the engine is playing
+RECORD_POLL_MS = 200  # how often the Record button's elapsed time is redrawn
+AUDIO_EXTENSIONS = (".wav", ".flac", ".ogg", ".mp3")
+IMPORT_REPORT_NAMES = 10  # names listed before the rest are counted
+
+
+def _name_list(names):
+    shown = "\n".join(names[:IMPORT_REPORT_NAMES])
+    rest = len(names) - IMPORT_REPORT_NAMES
+    return f"{shown}\nand {rest} more" if rest > 0 else shown
 
 
 class SoundListMixin:
@@ -96,7 +110,8 @@ class SoundListMixin:
         self._refresh_sound_list()
         self._apply_hotkeys()
         self.audio_engine.preload(
-            resolve_sound_path(s["path"]) for s in self.sounds if s.get("enabled", True)
+            resolve_sound_path(path) for s in self.sounds if s.get("enabled", True)
+            for path in sound_paths(s)
         )
 
     def _on_profile_change(self, name):
@@ -203,12 +218,15 @@ class SoundListMixin:
         self.list_frame.bind("<Configure>", self._on_list_resize, add="+")
         self._drag_from = None
         self._playing_widgets = {}
+        self._last_clip = {}  # group key -> the member that played last
         self._refresh_sound_list()
         self._poll_playing()
 
     @staticmethod
     def _sound_key(sound):
-        """How the engine identifies clips from this entry's file."""
+        """How the engine identifies what this entry plays. A group is
+        keyed by its first clip, so the key survives its members
+        changing under it."""
         return os.path.abspath(resolve_sound_path(sound["path"]))
 
     def stop_sound(self, sound):
@@ -297,7 +315,9 @@ class SoundListMixin:
             else:
                 hotkey = sound.get("hotkey") or ""
                 loop = "loop" if sound.get("loop") else ""
-                lines.append("  ".join(p for p in (hotkey, loop) if p) or " ")
+                clips = len(sound_paths(sound))
+                group = f"{clips} clips" if clips > 1 else ""
+                lines.append("  ".join(p for p in (hotkey, loop, group) if p) or " ")
             # A cell, not a bare button, so the tile can carry a progress
             # bar under it the way list rows do.
             cell = ctk.CTkFrame(self.list_frame, fg_color="transparent")
@@ -373,6 +393,9 @@ class SoundListMixin:
         )
         label.pack(fill="x")
         meta = [sound.get("hotkey") or "no hotkey"]
+        clips = len(sound_paths(sound))
+        if clips > 1:
+            meta.append(f"{clips} clips, random")
         if sound.get("loop"):
             meta.append("loop")
         if missing:
@@ -459,6 +482,18 @@ class SoundListMixin:
             command=lambda: self._set_loop(index, self._loop_var.get()),
         )
         menu.add_command(label="Rename...", command=lambda: self.rename_sound(index))
+        menu.add_command(label="Add clips...", command=lambda: self.add_clips_to_group(index))
+        paths = sound_paths(sound)
+        if len(paths) > 1:
+            remove = tk.Menu(menu, tearoff=0)
+            for path in paths:
+                remove.add_command(
+                    label=os.path.basename(path),
+                    command=lambda p=path: self.remove_clip_from_group(index, p),
+                )
+            menu.add_cascade(label="Remove one clip", menu=remove)
+            # Held on self so the submenu outlives the call that built it.
+            self._group_menu = remove
         menu.add_command(label="Move up", command=lambda: self.move_sound(index, index - 1),
                          state="normal" if index > 0 else "disabled")
         menu.add_command(label="Move down", command=lambda: self.move_sound(index, index + 1),
@@ -563,6 +598,17 @@ class SoundListMixin:
             fg_color=COLOR_ORANGE, hover_color=COLOR_ORANGE_HOVER, text_color=COLOR_ON_ACCENT,
         ).pack(side="left")
         ctk.CTkButton(
+            frame, text="Add folder", command=self.add_folder,
+            fg_color=COLOR_ROW, hover_color=COLOR_ROW_HOVER, text_color=COLOR_TEXT,
+            border_width=1, border_color=COLOR_BORDER,
+        ).pack(side="left", padx=(8, 0))
+        self.record_button = ctk.CTkButton(
+            frame, text="Record", width=90, command=self.toggle_record,
+            fg_color=COLOR_ROW, hover_color=COLOR_ROW_HOVER, text_color=COLOR_TEXT,
+            border_width=1, border_color=COLOR_BORDER,
+        )
+        self.record_button.pack(side="left", padx=(8, 0))
+        ctk.CTkButton(
             frame, text="Stop all", command=self.audio_engine.stop_all,
             fg_color=COLOR_ERROR, hover_color=COLOR_ERROR_HOVER, text_color=COLOR_ON_ERROR,
         ).pack(side="left", padx=(8, 0))
@@ -601,28 +647,190 @@ class SoundListMixin:
         return os.path.basename(dest)
 
     def add_sound(self):
-        path = filedialog.askopenfilename(
-            title="Choose audio file",
+        paths = filedialog.askopenfilenames(
+            title="Choose audio files",
             filetypes=[("Audio files", "*.wav *.flac *.ogg *.mp3"), ("All files", "*.*")],
         )
-        if not path:
+        if paths:
+            self._add_sound_files(paths)
+
+    def add_folder(self):
+        folder = filedialog.askdirectory(title="Choose a folder of sounds")
+        if not folder:
             return
-        stored_path = self._import_into_sounds_dir(path)
-        existing = self._find_sound(resolve_sound_path(stored_path))
-        if existing is not None:
-            messagebox.showinfo("Already added", f"This file is already on your board as '{existing['name']}'.")
+        try:
+            names = sorted(os.listdir(folder), key=str.lower)
+        except OSError as e:
+            messagebox.showerror("Could not read folder", str(e))
             return
-        name = os.path.splitext(os.path.basename(path))[0]
-        self._add_sound_entry(name, stored_path)
+        # Files only: a folder of albums would otherwise pull in a board
+        # nobody asked for.
+        paths = [os.path.join(folder, name) for name in names
+                 if os.path.splitext(name)[1].lower() in AUDIO_EXTENSIONS
+                 and os.path.isfile(os.path.join(folder, name))]
+        if not paths:
+            messagebox.showinfo("Nothing to add", "That folder has no wav, flac, ogg or mp3 files in it.")
+            return
+        self._add_sound_files(paths)
+
+    def _add_sound_files(self, paths):
+        """Import several files as board entries, writing the config and
+        redrawing the list once at the end rather than per file, and
+        telling the user what didn't make it instead of stopping."""
+        added, skipped, failed = 0, [], []
+        for path in paths:
+            try:
+                stored_path = self._import_into_sounds_dir(path)
+            except OSError as e:
+                failed.append(f"{os.path.basename(path)}: {e}")
+                continue
+            if self._find_sound(resolve_sound_path(stored_path)) is not None:
+                skipped.append(os.path.basename(path))
+                continue
+            self.sounds.append(self._new_sound_entry(
+                os.path.splitext(os.path.basename(path))[0], stored_path))
+            added += 1
+        if added:
+            save_config(self.config)
+            self._refresh_sound_list()
+        self._report_import(added, skipped, failed)
+
+    @staticmethod
+    def _report_import(added, skipped, failed):
+        if not skipped and not failed:
+            return  # the new rows are the confirmation
+        lines = [f"Added {added} sound{'s' if added != 1 else ''}."]
+        if skipped:
+            lines.append(f"\nAlready on the board ({len(skipped)}):\n" + _name_list(skipped))
+        if failed:
+            lines.append(f"\nCouldn't be added ({len(failed)}):\n" + _name_list(failed))
+        show = messagebox.showinfo if not failed else messagebox.showwarning
+        show("Add sounds", "\n".join(lines))
+
+    # -- recording ----------------------------------------------------------
+
+    def toggle_record(self):
+        """Record the microphone straight into the board. What is captured
+        is the mic alone, before mute and push-to-talk, so a muted mic
+        still records and the soundboard's own clips stay out of it."""
+        if self.audio_engine.recording_seconds() is not None:
+            self._finish_recording()
+            return
+        if not self.audio_engine.start_recording():
+            messagebox.showinfo(
+                "No microphone",
+                "Choose an input device above and wait for it to start "
+                "before recording.",
+            )
+            return
+        self._update_record_button()
+        self._poll_recording()
+
+    def _poll_recording(self):
+        seconds = self.audio_engine.recording_seconds()
+        if seconds is None:
+            return  # stopped from elsewhere
+        if seconds >= RECORD_MAX_S:
+            self._finish_recording(capped=True)
+            return
+        self._update_record_button(seconds)
+        self.root.after(RECORD_POLL_MS, self._poll_recording)
+
+    def _update_record_button(self, seconds=0.0):
+        if self.audio_engine.recording_seconds() is None:
+            self.record_button.configure(
+                text="Record", fg_color=COLOR_ROW, hover_color=COLOR_ROW_HOVER,
+                text_color=COLOR_TEXT, border_width=1,
+            )
+            return
+        self.record_button.configure(
+            text=f"Stop {int(seconds) // 60}:{int(seconds) % 60:02d}",
+            fg_color=COLOR_ERROR, hover_color=COLOR_ERROR_HOVER,
+            text_color=COLOR_ON_ERROR, border_width=0,
+        )
+
+    def _finish_recording(self, capped=False):
+        data = self.audio_engine.stop_recording()
+        self._update_record_button()
+        if data is None:
+            messagebox.showinfo(
+                "Nothing recorded",
+                "The recording was too short to keep. Check that the input "
+                "device is the microphone you are speaking into.",
+            )
+            return
+        name = time.strftime("Recording %Y-%m-%d %H.%M.%S")
+        try:
+            ensure_sounds_dir()
+            dest = unique_path(os.path.join(SOUNDS_DIR, sanitize_filename(name + ".wav")))
+            sf.write(dest, data, SAMPLE_RATE)
+        except OSError as e:
+            messagebox.showerror("Could not save recording", str(e))
+            return
+        self._add_sound_entry(name, os.path.basename(dest))
+        if capped:
+            messagebox.showinfo(
+                "Recording stopped",
+                f"Recordings stop after {RECORD_MAX_S // 60} minutes. "
+                f"'{name}' was added to your board.",
+            )
+
+    def add_clips_to_group(self, index):
+        """Turn an entry into a random group, or add to one. Triggering it
+        then plays one of its clips at random."""
+        sound = self.sounds[index]
+        chosen = filedialog.askopenfilenames(
+            title=f"Add clips to '{sound['name']}'",
+            filetypes=[("Audio files", "*.wav *.flac *.ogg *.mp3"), ("All files", "*.*")],
+        )
+        if not chosen:
+            return
+        paths = sound_paths(sound)
+        added = 0
+        for path in chosen:
+            try:
+                stored_path = self._import_into_sounds_dir(path)
+            except OSError as e:
+                messagebox.showerror("Could not add clip", f"{os.path.basename(path)}: {e}")
+                continue
+            if stored_path in paths:
+                continue
+            paths.append(stored_path)
+            added += 1
+        if not added:
+            return
+        sound["paths"] = paths
+        save_config(self.config)
+        self._refresh_sound_list()
+        self.audio_engine.preload(resolve_sound_path(p) for p in paths)
+
+    def remove_clip_from_group(self, index, path):
+        """Take one clip out of a group. The file stays in Sounds/: it may
+        be on the board elsewhere, and removing a whole entry is what
+        offers to delete files."""
+        sound = self.sounds[index]
+        paths = [p for p in sound_paths(sound) if p != path]
+        if not paths:
+            return
+        sound["path"] = paths[0]
+        if len(paths) > 1:
+            sound["paths"] = paths
+        else:
+            sound.pop("paths", None)
+        self._last_clip.pop(self._sound_key(sound), None)
+        save_config(self.config)
+        self._refresh_sound_list()
+        self._apply_hotkeys()
 
     def _find_sound(self, path):
         """The board entry that plays this file, if any."""
         for sound in self.sounds:
-            if same_file(resolve_sound_path(sound["path"]), path):
+            if any(same_file(resolve_sound_path(p), path) for p in sound_paths(sound)):
                 return sound
         return None
 
-    def _add_sound_entry(self, name, stored_path, source=None):
+    @staticmethod
+    def _new_sound_entry(name, stored_path, source=None):
         """`source` is where a downloaded clip came from, so the board can
         be shared as links rather than audio. Files picked from disk and
         clips saved by the editor have none, and aren't shareable."""
@@ -630,47 +838,75 @@ class SoundListMixin:
                  "volume": NEW_SOUND_VOLUME, "loop": False}
         if source is not None:
             entry["source"] = source
-        self.sounds.append(entry)
+        return entry
+
+    def _add_sound_entry(self, name, stored_path, source=None):
+        self.sounds.append(self._new_sound_entry(name, stored_path, source))
         save_config(self.config)
         self._refresh_sound_list()
 
     def remove_sound(self, index):
         sound = self.sounds[index]
-        path = resolve_sound_path(sound["path"])
-        shared = any(
-            same_file(resolve_sound_path(other["path"]), path)
-            for i, other in enumerate(self.sounds) if i != index
-        )
         # Only offer to delete files the app owns that nothing else uses.
-        delete_file = False
-        if not shared and os.path.isfile(path) and same_file(os.path.dirname(path), SOUNDS_DIR):
+        # A group is several files, and any of them may be on the board
+        # under another entry.
+        deletable = [
+            path for path in (resolve_sound_path(p) for p in sound_paths(sound))
+            if os.path.isfile(path) and same_file(os.path.dirname(path), SOUNDS_DIR)
+            and not any(
+                any(same_file(resolve_sound_path(p), path) for p in sound_paths(other))
+                for i, other in enumerate(self.sounds) if i != index
+            )
+        ]
+        delete_files = False
+        if deletable:
+            files = (os.path.basename(deletable[0]) if len(deletable) == 1
+                     else f"{len(deletable)} files")
             answer = messagebox.askyesnocancel(
                 "Remove sound",
                 f"Remove '{sound['name']}' from the board?\n\n"
-                f"Yes: also delete {os.path.basename(path)} from the Sounds folder.\n"
+                f"Yes: also delete {files} from the Sounds folder.\n"
                 "No: keep the file.",
             )
             if answer is None:
                 return
-            delete_file = answer
+            delete_files = answer
         self.audio_engine.stop_key(self._sound_key(sound))
+        self._last_clip.pop(self._sound_key(sound), None)
         del self.sounds[index]
         save_config(self.config)
         self._refresh_sound_list()
         self._apply_hotkeys()
-        if delete_file:
-            try:
-                os.remove(path)
-            except OSError as e:
-                messagebox.showerror("Could not delete file", str(e))
+        if delete_files:
+            for path in deletable:
+                try:
+                    os.remove(path)
+                except OSError as e:
+                    messagebox.showerror("Could not delete file", str(e))
 
     # -- playback -----------------------------------------------------------
 
     def play_sound(self, sound):
-        path = resolve_sound_path(sound["path"])
+        key = self._sound_key(sound)
+        # The key is the entry, not the file that happens to come up, so
+        # stopping, looping and the playing indicator keep working for a
+        # group whichever member is playing.
         self.audio_engine.play(
-            path, gain=sound.get("volume", 100) / 100, loop=sound.get("loop", False),
+            resolve_sound_path(self._pick_clip(sound, key)),
+            gain=sound.get("volume", 100) / 100, loop=sound.get("loop", False), key=key,
         )
+
+    def _pick_clip(self, sound, key):
+        """A random member of a group, never the one that played last
+        while there is another to choose, so a pair alternates instead of
+        repeating itself."""
+        paths = sound_paths(sound)
+        if len(paths) == 1:
+            return paths[0]
+        choices = [p for p in paths if p != self._last_clip.get(key)] or paths
+        chosen = random.choice(choices)
+        self._last_clip[key] = chosen
+        return chosen
 
     def _on_playback_error(self, message):
         # Called from the audio worker thread.

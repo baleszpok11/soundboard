@@ -35,6 +35,8 @@ MIC_PHONE_BAND_HZ = (300.0, 3000.0)
 # one second leaves the sine continuous.
 MIC_ROBOT_HZ = 80.0
 MIC_DRIVE_DB = 18.0
+RECORD_MAX_S = 180  # a forgotten recording stops here instead of filling memory
+RECORD_MIN_S = 0.2  # shorter than this is a mis-click, not a clip
 TEST_TONE_S = 0.8
 TEST_TONE_HZ = 440.0
 TEST_TONE_LEVEL = 0.4
@@ -238,6 +240,11 @@ class AudioEngine:
         self._mic_buffer = collections.deque()
         self._mic_frames = 0
         self._mic_ready = False
+        # Raw mic blocks kept while recording a clip: None when idle, so
+        # the input callback can tell the two apart in one check.
+        self._recording = None
+        self._recording_frames = 0
+        self._recording_channels = 0
         self._active_sounds = []
         self._active_sounds_monitor = []
         self.dropouts = 0
@@ -406,6 +413,37 @@ class AudioEngine:
         with self._lock:
             self.mic_effects.set(name, amount)
 
+    def start_recording(self):
+        """Begin keeping the raw mic blocks the input callback receives.
+        Recording is taken before mute, push-to-talk and the mic volume,
+        so a muted mic still records what it hears. False when there is
+        no microphone running to record from."""
+        with self._lock:
+            if self.input_stream is None:
+                return False
+            self._recording = []
+            self._recording_frames = 0
+            self._recording_channels = self.input_channels
+            return True
+
+    def recording_seconds(self):
+        """How long the recording in progress is, or None when idle."""
+        with self._lock:
+            if self._recording is None:
+                return None
+            return self._recording_frames / SAMPLE_RATE
+
+    def stop_recording(self):
+        """Stop and return what was captured as float32 frames, or None
+        if nothing worth keeping came in."""
+        with self._lock:
+            parts, self._recording = self._recording, None
+            self._recording_frames = 0
+        if not parts:
+            return None
+        data = np.concatenate(parts)
+        return data if len(data) >= RECORD_MIN_S * SAMPLE_RATE else None
+
     def set_monitor_muted(self, muted):
         with self._lock:
             self.monitor_muted = muted
@@ -418,10 +456,19 @@ class AudioEngine:
             if status:
                 self.dropouts += 1
             self.input_peak = float(np.abs(indata).max()) if indata.size else 0.0
-            self._mic_buffer.append(indata.copy())
-            self._mic_frames += len(indata)
+            # One copy serves both: the mixer only ever reads these blocks
+            # (_take_mic concatenates into a fresh array before anything
+            # scales it), so the recording cannot be altered underneath.
+            block = indata.copy()
+            self._mic_buffer.append(block)
+            self._mic_frames += len(block)
             while self._mic_frames > MIC_MAX_FRAMES:
                 self._mic_frames -= len(self._mic_buffer.popleft())
+            if (self._recording is not None
+                    and self._recording_frames < RECORD_MAX_S * SAMPLE_RATE
+                    and block.shape[1] == self._recording_channels):
+                self._recording.append(block)
+                self._recording_frames += len(block)
 
     def _on_output(self, outdata, frames, time_info, status):
         self._last_callback["output"] = time.monotonic()
@@ -521,25 +568,28 @@ class AudioEngine:
             if self.monitor_stream is not None and not self.monitor_muted:
                 self._active_sounds_monitor.append(_ActiveSound(monitor_data, key, gain, loop))
 
-    def play(self, path, gain=1.0, loop=False):
+    def play(self, path, gain=1.0, loop=False, key=None):
         """Queue a file for playback without blocking the caller. Errors
-        are reported through on_error."""
-        self._requests.put((path, gain, True, loop))
+        are reported through on_error. `key` identifies what is playing
+        for stopping and restarting; it defaults to the file, which a
+        board entry that can play several files overrides so all of them
+        answer to the one entry."""
+        self._requests.put((path, gain, True, loop, key))
 
     def preload(self, paths):
         """Decode files into the cache in the background."""
         for path in paths:
-            self._requests.put((path, 1.0, False, False))
+            self._requests.put((path, 1.0, False, False, None))
 
     def _worker(self):
         while True:
-            path, gain, play, loop = self._requests.get()
+            path, gain, play, loop, key = self._requests.get()
             try:
                 if play and self.output_stream is None and self.monitor_stream is None:
                     raise RuntimeError("No output device selected.")
                 data = self._load_clip(path)
                 if play:
-                    self._queue_clip(data, os.path.abspath(path), gain, loop)
+                    self._queue_clip(data, key or os.path.abspath(path), gain, loop)
             except FileNotFoundError:
                 if play and self.on_error is not None:
                     self.on_error(f"File not found: {path}")
