@@ -61,8 +61,29 @@ from .theme import (
 
 PLAYING_POLL_MS = 100  # how often the board re-reads what the engine is playing
 RECORD_POLL_MS = 200  # how often the Record button's elapsed time is redrawn
+_length_cache = {}  # (path, mtime, size) -> "m:ss", so a redraw doesn't re-read every file
 AUDIO_EXTENSIONS = (".wav", ".flac", ".ogg", ".mp3")
 IMPORT_REPORT_NAMES = 10  # names listed before the rest are counted
+
+
+def _clip_length(path):
+    """A clip's length as m:ss, or None when the file is missing or not
+    audio we can read. soundfile reads the header only, and the answer is
+    cached: the list is rebuilt on every search keystroke."""
+    try:
+        stat = os.stat(path)
+    except OSError:
+        return None
+    key = (path, stat.st_mtime_ns, stat.st_size)
+    if key not in _length_cache:
+        try:
+            with sf.SoundFile(path) as clip:
+                seconds = len(clip) / clip.samplerate
+        except Exception:
+            _length_cache[key] = None
+        else:
+            _length_cache[key] = f"{int(seconds) // 60}:{int(seconds) % 60:02d}"
+    return _length_cache[key]
 
 
 def _name_list(names):
@@ -325,7 +346,8 @@ class SoundListMixin:
                 loop = "loop" if sound.get("loop") else ""
                 clips = len(sound_paths(sound))
                 group = f"{clips} clips" if clips > 1 else ""
-                lines.append("  ".join(p for p in (hotkey, loop, group) if p) or " ")
+                length = _clip_length(resolve_sound_path(sound["path"])) or ""
+                lines.append("  ".join(p for p in (hotkey, length, loop, group) if p) or " ")
             # A cell, not a bare button, so the tile can carry a progress
             # bar under it the way list rows do.
             cell = ctk.CTkFrame(self.list_frame, fg_color="transparent")
@@ -401,6 +423,9 @@ class SoundListMixin:
         )
         label.pack(fill="x")
         meta = [sound.get("hotkey") or "no hotkey"]
+        length = _clip_length(resolved_path)
+        if length is not None:
+            meta.append(length)
         clips = len(sound_paths(sound))
         if clips > 1:
             meta.append(f"{clips} clips, random")

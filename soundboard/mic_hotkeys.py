@@ -7,7 +7,7 @@ import customtkinter as ctk
 
 from .audio_engine import MIC_EFFECTS, REPLAY_S
 from .config import save_config
-from .dialogs import HotkeyDialog, error, warn
+from .dialogs import HotkeyDialog, ask_yes_no, error, warn
 from .hotkeys import (
     MACOS_INPUT_MONITORING_URL,
     HotkeyListener,
@@ -272,7 +272,35 @@ class MicHotkeyMixin:
         if other is not None:
             error(self.root, "Hotkey in use", f"'{hotkey}' is already used by {other}.")
             return None
+        elsewhere = self._hotkey_owner_elsewhere(hotkey)
+        if elsewhere is not None:
+            profile, label = elsewhere
+            # Profiles are meant to be independent and only the active
+            # one's hotkeys are registered, so this is worth knowing
+            # rather than worth refusing.
+            if not ask_yes_no(
+                self.root,
+                "Used in another profile",
+                f"'{hotkey}' is already {label} in the profile '{profile}'.\n\n"
+                "That only matters when you switch to it. Use this key here anyway?",
+            ):
+                return None
         return hotkey
+
+    def _hotkey_owner_elsewhere(self, hotkey):
+        """The first sound in an inactive profile that already uses this
+        key, as (profile name, label). Only the active profile's hotkeys
+        are registered, so a clash there is invisible until the profiles
+        are switched."""
+        keys = hotkey_keys(hotkey)
+        for profile in self.config.get("profiles", []):
+            if profile is self.profile:
+                continue
+            for sound in profile.get("sounds", []):
+                other = sound.get("hotkey")
+                if other and hotkey_keys(other) == keys:
+                    return profile.get("name", "?"), f"used by '{sound.get('name', '?')}'"
+        return None
 
     def _hotkey_owner(self, hotkey, skip):
         keys = hotkey_keys(hotkey)
