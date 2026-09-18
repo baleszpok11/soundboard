@@ -7,4 +7,5 @@ scipy
 yt-dlp
 imageio-ffmpeg
 pystray
+pyttsx3
 pillow
