@@ -223,6 +223,11 @@ yourself.
 - Playing a sound that's already playing restarts it from the beginning.
 - **Mic volume / Soundboard volume:** 0–200%. Each sound also has its own
   volume slider. A limiter keeps the combined output from distorting.
+- New sounds start at 20%, because clips are usually mastered much louder
+  than a voice and full volume is how people deafen a call the first time
+  they press a button. Turn a sound up once and it stays there. Sounds
+  already on your board are not touched. In grid view the slider is under
+  "Volume..." in a tile's right-click menu.
 - **Mute mic** silences your voice while sounds keep playing; "Set mute
   hotkey" toggles it from anywhere. **Push to talk** only sends your voice
   while the talk key is held (set it with "Set talk key"); sounds always
