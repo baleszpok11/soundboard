@@ -22,6 +22,7 @@ from soundboard.app import Soundboard
 from soundboard.audio_engine import PORTAUDIO_ERROR, sd
 from soundboard.config import ICON_ICO_PATH, ICON_PATH, write_error_log
 from soundboard.dialogs import handle_exception, show_error
+from soundboard.mac_scroll import fix_trackpad_scrolling
 from soundboard.win_window import (
     fit_to_monitor_on_move,
     fix_dpi_rescaling,
@@ -73,10 +74,11 @@ def main():
                 "Fedora: sudo dnf install portaudio\n"
                 "Arch: sudo pacman -S portaudio"
             )
-        # Both of these patch CustomTkinter's window classes, so they
-        # have to be in place before the first window is built.
+        # These patch CustomTkinter's own classes, so they have to be in
+        # place before the first window or scrollable frame is built.
         use_app_icon()
         fix_dpi_rescaling()
+        fix_trackpad_scrolling()
         # The look is set in Soundboard.__init__, once the config has been
         # read: the appearance mode is a setting, and the platform tokens
         # need a window before they can ask Tk which fonts exist.
