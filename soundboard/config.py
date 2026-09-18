@@ -181,6 +181,9 @@ def load_config():
     # dB so the setting means the same thing whatever the mic volume is.
     config.setdefault("duck_mic", False)
     config.setdefault("duck_amount", 12)
+    # How long a stop takes to fade. Short enough to still feel like a
+    # stop, long enough that "Stop all" is not a click mid-note.
+    config.setdefault("stop_fade", 0.08)
     # The measured microphone, in LUFS, or None to use dsp's default
     # target until someone measures their voice.
     reference = config.get("reference_lufs")
@@ -229,6 +232,7 @@ def _load_sound(sound):
     sound.setdefault("volume", 100)
     _load_sound_group(sound)
     _load_sound_loudness(sound)
+    _load_sound_fades(sound)
     return sound
 
 
@@ -266,6 +270,32 @@ def _load_sound_loudness(sound):
         sound["loudness"] = kept
     else:
         sound.pop("loudness", None)
+
+
+FADE_KEYS = ("fade_in", "fade_out", "crossfade")
+FADE_MAX_S = 30.0  # a fade longer than this is a typo, not a choice
+
+
+def _load_sound_fades(sound):
+    """Keep the fade times numeric and sane, and drop the ones set to no
+    fade. Absent means no fade everywhere they are read, so a board with
+    fades still plays in a version that has never heard of them."""
+    for key in FADE_KEYS:
+        value = sound.get(key)
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            sound.pop(key, None)
+            continue
+        value = min(FADE_MAX_S, max(0.0, float(value)))
+        if value:
+            sound[key] = value
+        else:
+            sound.pop(key, None)
+
+
+def sound_fades(sound):
+    """The entry's fade times in seconds, as keyword arguments for
+    audio_engine.Fades. All zero for an entry that sets none."""
+    return {key: float(sound.get(key, 0.0) or 0.0) for key in FADE_KEYS}
 
 
 def sound_loudness(sound, path):

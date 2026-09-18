@@ -237,6 +237,7 @@ GAP = T.gap
 CARD_BORDER = T.card_border
 
 VOLUME_MAX = 200  # percent
+FADE_SLIDER_MAX_S = 10.0  # the longest fade the per-sound sliders offer
 
 APPEARANCE_MODES = ("system", "light", "dark")
 
