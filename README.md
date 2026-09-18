@@ -35,8 +35,8 @@ together, from one virtual microphone.
   different one, never the same one twice in a row
 - Re-triggering a sound that's still playing restarts it
 - Loop a sound so it keeps repeating, for music beds and ambience
-- Per-sound fade in and fade out, a crossfade at the loop point, and a
-  "Stop all" that fades instead of cutting a track dead mid-note
+- Per-sound fade in and fade out, a crossfade at the loop point, and an
+  optional "Stop all" that fades instead of cutting a track dead
 - See what's playing on the board, and stop a single sound without
   stopping everything
 - "Stop all" button and optional hotkey
@@ -251,8 +251,11 @@ button on the Soundboard tab, so the board itself keeps the window.
 - **Fades...** in a sound's More menu sets its fade in, its fade out and,
   for a looping sound, a crossfade at the wrap so a loop that wasn't cut
   at a zero crossing doesn't tick once a bar. All default to none, so
-  sounds behave exactly as before until you set one. Stopping a sound or
-  hitting "Stop all" fades it out over 80 ms rather than cutting it dead.
+  sounds behave exactly as before until you set one.
+- **Stopping:** in the settings, "Fade out instead of cutting" makes
+  stopping a sound and "Stop all" fade rather than cut, over the length
+  on the slider (80 ms by default, up to 2 seconds). Off until you switch
+  it on, and the length is kept while it's off.
 - "Loop" in the same menu makes a sound repeat until stopped; looping
   sounds are marked "(loop)" on the board. Turning Loop off stops the
   repeat straight away rather than waiting for the current pass to end.
