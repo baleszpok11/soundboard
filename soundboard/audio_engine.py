@@ -31,7 +31,9 @@ LIMITER_RELEASE_S = 0.3
 # full of short clips does not pump the voice in and out.
 DUCK_ATTACK_S = 0.06
 DUCK_RELEASE_S = 0.35
-STOP_FADE_S = 0.08  # a stop is a quick fade, not a cut: long enough to lose the click
+STOP_FADE_S = 0.08  # default length of the stop fade, once switched on
+STOP_FADE_MIN_S = 0.05
+STOP_FADE_MAX_S = 2.0
 DUCK_MIN_DB = 3
 DUCK_MUTE_DB = 40  # the top of the control is a real mute, not 40 dB down
 STREAM_TIMEOUT_S = 2.0  # a running stream with no callbacks for this long is treated as lost
@@ -419,7 +421,9 @@ class AudioEngine:
         self.mic_enabled = True  # False while muted or push-to-talk isn't held
         self._mic_level = 1.0  # gain applied to the last block, for smooth changes
         self.sound_gain = 1.0
-        self.stop_fade_s = STOP_FADE_S  # how long stop_all and stop_key take
+        # How long stop_all and stop_key take. 0 cuts, which is what a
+        # board does until the setting is switched on.
+        self.stop_fade_s = 0.0
         self.mic_effects = _MicEffectChain()
         self._ducker = _Ducker()
         self._output_limiter = _Limiter()

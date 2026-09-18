@@ -110,8 +110,10 @@ virtual audio cable.
   stop_all mark a clip stopping and let the mixer drop it when the
   envelope lands, so active_keys()/playback_progress() skip a stopping
   clip - its row must stop showing as playing at once, not when the fade
-  ends. A fade of 0 still drops immediately, which is what a profile
-  switch wants
+  ends. A fade of 0 still drops immediately, which is both what a profile
+  switch wants and what config "stop_fade_on" being off gives everyone:
+  the engine's stop_fade_s is 0 until the setting is switched on, so a
+  board that predates this cuts exactly as it always did
 - Ducking: _Ducker in audio_engine.py drops the mic while anything is in
   _active_sounds, applied in _on_output only - the monitor callback
   carries clips alone, so what reaches the cable ducks and what you hear

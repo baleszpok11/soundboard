@@ -9,7 +9,14 @@ import webbrowser
 from .dialogs import error
 import customtkinter as ctk
 
-from .audio_engine import SAMPLE_RATE, STOP_FADE_S, sd, test_tone
+from .audio_engine import (
+    SAMPLE_RATE,
+    STOP_FADE_MAX_S,
+    STOP_FADE_MIN_S,
+    STOP_FADE_S,
+    sd,
+    test_tone,
+)
 from .config import save_config
 from .dsp import LOUDNESS_TARGET_LUFS, measure_loudness
 from .theme import (
@@ -235,9 +242,10 @@ class DeviceMixin:
         self._add_volume_row(frame, 2, "Mic volume:", "mic_volume", "mic_gain")
         self._add_volume_row(frame, 3, "Soundboard volume:", "sound_volume", "sound_gain")
         self._build_match_controls(frame, 4)
-        self._build_mic_controls(frame, 5)
-        self._build_startup_controls(frame, 6)
-        self._build_appearance_controls(frame, 7)
+        self._build_stop_fade_controls(frame, 5)
+        self._build_mic_controls(frame, 6)
+        self._build_startup_controls(frame, 7)
+        self._build_appearance_controls(frame, 8)
         return frame
 
     def _build_match_controls(self, frame, row):
@@ -268,6 +276,58 @@ class DeviceMixin:
             box, text="", text_color=COLOR_TEXT_DIM, font=font("small"), anchor="w")
         self.match_status.grid(row=1, column=0, columnspan=2, sticky="w", pady=(4, 0))
         self._update_match_status()
+
+    def _build_stop_fade_controls(self, frame, row):
+        """Whether stopping fades or cuts. Off by default: cutting is what
+        every board already does, and a stop that suddenly takes time to
+        happen is not a change to make behind someone's back."""
+        ctk.CTkLabel(frame, text="Stopping:", text_color=COLOR_TEXT_DIM,
+                     font=font("small_bold")).grid(
+            row=row, column=0, sticky="w", padx=8, pady=6)
+        box = ctk.CTkFrame(frame, fg_color="transparent")
+        box.grid(row=row, column=1, columnspan=2, sticky="ew", padx=8, pady=6)
+        self.stop_fade_checkbox = ctk.CTkCheckBox(
+            box, text="Fade out instead of cutting",
+            command=self._on_toggle_stop_fade,
+            fg_color=COLOR_ORANGE, hover_color=COLOR_ORANGE_HOVER,
+            checkmark_color=COLOR_ON_ACCENT, text_color=COLOR_TEXT,
+        )
+        if self.config.get("stop_fade_on"):
+            self.stop_fade_checkbox.select()
+        self.stop_fade_checkbox.pack(side="left")
+        self.stop_fade_slider = ctk.CTkSlider(
+            box, from_=STOP_FADE_MIN_S, to=STOP_FADE_MAX_S, width=120,
+            number_of_steps=int((STOP_FADE_MAX_S - STOP_FADE_MIN_S) * 20),
+            command=self._on_stop_fade_amount,
+        )
+        self.stop_fade_slider.set(self.config.get("stop_fade", STOP_FADE_S))
+        self.stop_fade_slider.pack(side="left", padx=(8, 0))
+        self.stop_fade_label = ctk.CTkLabel(
+            box, text="", width=52, font=font("small"), text_color=COLOR_TEXT_DIM)
+        self.stop_fade_label.pack(side="left")
+        self._apply_stop_fade()
+
+    def _stop_fade_seconds(self):
+        """What the engine gets: 0 when switched off, which is the cut it
+        has always done."""
+        if not self.config.get("stop_fade_on"):
+            return 0.0
+        return float(self.config.get("stop_fade", STOP_FADE_S))
+
+    def _on_toggle_stop_fade(self):
+        self.config["stop_fade_on"] = bool(self.stop_fade_checkbox.get())
+        save_config(self.config)
+        self._apply_stop_fade()
+
+    def _on_stop_fade_amount(self, value):
+        self.config["stop_fade"] = round(float(value), 2)
+        self._apply_stop_fade()
+        self._save_config_soon()
+
+    def _apply_stop_fade(self):
+        seconds = self.config.get("stop_fade", STOP_FADE_S)
+        self.stop_fade_label.configure(text=f"{int(round(seconds * 1000))} ms")
+        self.audio_engine.stop_fade_s = self._stop_fade_seconds()
 
     def _update_match_status(self):
         reference = self.config.get("reference_lufs")
@@ -458,7 +518,7 @@ class DeviceMixin:
             monitor_device = None
         self.audio_engine.mic_gain = self.config["mic_volume"] / 100
         self.audio_engine.sound_gain = self.config["sound_volume"] / 100
-        self.audio_engine.stop_fade_s = self.config.get("stop_fade", STOP_FADE_S)
+        self.audio_engine.stop_fade_s = self._stop_fade_seconds()
         self.audio_engine.start(input_device, output_device, monitor_device)
         self.audio_engine.set_monitor_muted(not self.config.get("hear_self", True))
         self._update_device_warnings()
