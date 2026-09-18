@@ -53,7 +53,14 @@ DEVICES = {
     "macos": ("MacBook Pro Microphone", "BlackHole 2ch"),
     "linux": ("pulse", "pulse"),
 }
-LOOPBACK = "Stereo Mix (Realtek High Definition Audio)"
+# An input that carries what the PC plays rather than a real microphone,
+# as each platform spells it. devices.LOOPBACK_INPUT_HINTS has to match
+# these or the warning never appears and the shot cannot be taken.
+LOOPBACK = {
+    "windows": "Stereo Mix (Realtek High Definition Audio)",
+    "macos": "BlackHole 2ch",
+    "linux": "Monitor of Built-in Audio Analog Stereo",
+}
 
 
 def bbox(*widgets, pad=PAD):
@@ -80,8 +87,8 @@ def shoot(root, name, *widgets, pad=PAD):
     return path
 
 
-def set_devices(board, mic, cable):
-    board.input_devices = [(0, mic), (1, LOOPBACK)]
+def set_devices(board, mic, cable, loopback):
+    board.input_devices = [(0, mic), (1, loopback)]
     board.output_devices = [(0, cable), (1, "Speakers (Realtek High Definition Audio)")]
     board.input_menu.configure(values=[name for _, name in board.input_devices])
     board.output_menu.configure(values=[name for _, name in board.output_devices])
@@ -134,33 +141,35 @@ def main():
 
     device_rows = (mic_label, output_label, board.input_menu,
                    board.output_menu, board.output_meter)
-    set_devices(board, *DEVICES[platform_name])
+    set_devices(board, *DEVICES[platform_name], LOOPBACK[platform_name])
     board._update_meter(board.input_meter, 0.0, True, True)
     board._update_meter(board.output_meter, 0.0, True, True)
     shoot(root, f"devices-{platform_name}", *device_rows)
 
-    # The Test checkpoint and the feedback warning are shown once each, not
-    # per platform: they are written in Windows device names and the
-    # tutorial shows the same file to everyone.
-    if platform_name != "windows":
-        root.destroy()
-        return
-    # The output meter mid-tone, in the app's own colours rather than ones
-    # picked here.
+    # The Test checkpoint: the output meter mid-tone, in the app's own
+    # colours rather than ones picked here. Every page shows this one and
+    # the warning below, so both are taken per platform - a macOS page
+    # that goes from macOS dropdowns to a Windows-chrome meter reads as a
+    # screenshot of some other app.
     board._update_meter(board.output_meter, 0.62, True, True)
-    shoot(root, "test", output_label, board.output_menu, board.output_meter, output_side)
+    shoot(root, f"test-{platform_name}", output_label, board.output_menu,
+          board.output_meter, output_side)
 
     # The warning the app raises by itself when the microphone is a
     # loopback device, which is what makes people hear themselves back.
     root.geometry(WARNING_WINDOW)
-    board.config["input_device"] = LOOPBACK
-    board.input_var.set(LOOPBACK)
+    loopback = LOOPBACK[platform_name]
+    board.config["input_device"] = loopback
+    board.input_var.set(loopback)
     board._update_device_warnings()
     root.update_idletasks()
     root.update()
     if not board.loop_warning.cget("text"):
-        raise SystemExit("the feedback warning did not appear; has the check moved?")
-    shoot(root, "feedback", board.loop_warning, pad=3)
+        raise SystemExit(
+            f"the feedback warning did not appear for {loopback!r}; is it still "
+            "matched by devices.LOOPBACK_INPUT_HINTS?"
+        )
+    shoot(root, f"feedback-{platform_name}", board.loop_warning, pad=3)
 
     root.destroy()
 

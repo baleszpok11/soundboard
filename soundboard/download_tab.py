@@ -31,6 +31,7 @@ from .theme import (
     COLOR_SURFACE,
     COLOR_TEXT,
     COLOR_TEXT_DIM,
+    wrap_to_width,
 )
 
 
@@ -86,9 +87,9 @@ class DownloadMixin:
         self.download_progress = ctk.CTkProgressBar(
             frame, progress_color=COLOR_ORANGE, fg_color=COLOR_ROW,
         )
-        self.download_status = ctk.CTkLabel(
-            frame, text="", text_color=COLOR_TEXT, anchor="w", justify="left", wraplength=800,
-        )
+        self.download_status = wrap_to_width(ctk.CTkLabel(
+            frame, text="", text_color=COLOR_TEXT, anchor="w", justify="left",
+        ))
         self.download_status.pack(fill="x", padx=8, pady=(0, 8))
         self._download_cancel = None
         self.download_update_button = ctk.CTkButton(
@@ -101,9 +102,10 @@ class DownloadMixin:
         age = downloader_age_days()
         if age is not None and age > DOWNLOADER_STALE_DAYS:
             version_text += f" ({age} days old; if downloads fail, {update_hint()})"
-        ctk.CTkLabel(
-            frame, text=version_text, text_color=COLOR_TEXT_DIM, anchor="w", justify="left", wraplength=800,
-        ).pack(fill="x", padx=8, pady=(0, 8))
+        wrap_to_width(ctk.CTkLabel(
+            frame, text=version_text, text_color=COLOR_TEXT_DIM,
+            anchor="w", justify="left",
+        )).pack(fill="x", padx=8, pady=(0, 8))
 
         ctk.CTkLabel(
             parent,

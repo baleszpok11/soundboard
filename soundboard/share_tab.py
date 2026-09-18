@@ -28,6 +28,7 @@ from .theme import (
     COLOR_SURFACE,
     COLOR_TEXT,
     COLOR_TEXT_DIM,
+    wrap_to_width,
 )
 
 ACTIVE_ONLY = "Active profile"
@@ -48,12 +49,12 @@ class ShareMixin:
         ctk.CTkLabel(
             export, text="Export", text_color=COLOR_ACCENT_TEXT, anchor="w",
         ).pack(fill="x", padx=8, pady=(8, 0))
-        ctk.CTkLabel(
+        wrap_to_width(ctk.CTkLabel(
             export,
             text=("Saves a file listing your sounds and the links they came from. "
                   "The audio isn't included - whoever opens it downloads their own copy."),
-            text_color=COLOR_TEXT_DIM, anchor="w", justify="left", wraplength=800,
-        ).pack(fill="x", padx=8, pady=(2, 6))
+            text_color=COLOR_TEXT_DIM, anchor="w", justify="left",
+        )).pack(fill="x", padx=8, pady=(2, 6))
 
         row = ctk.CTkFrame(export, fg_color="transparent")
         row.pack(fill="x", padx=8, pady=(0, 6))
@@ -64,9 +65,9 @@ class ShareMixin:
         self.export_scope.set(ACTIVE_ONLY)
         self.export_scope.pack(side="left")
 
-        self.export_summary = ctk.CTkLabel(
-            export, text="", text_color=COLOR_TEXT, anchor="w", justify="left", wraplength=800,
-        )
+        self.export_summary = wrap_to_width(ctk.CTkLabel(
+            export, text="", text_color=COLOR_TEXT, anchor="w", justify="left",
+        ))
         self.export_summary.pack(fill="x", padx=8, pady=(0, 6))
         self.export_button = ctk.CTkButton(
             export, text="Export...", command=self.export_board,
@@ -79,12 +80,12 @@ class ShareMixin:
         ctk.CTkLabel(imp, text="Import", text_color=COLOR_ACCENT_TEXT, anchor="w").pack(
             fill="x", padx=8, pady=(8, 0)
         )
-        ctk.CTkLabel(
+        wrap_to_width(ctk.CTkLabel(
             imp,
             text=("Opens a board file someone shared and downloads each clip from its "
                   "original link. Check the links below before importing."),
-            text_color=COLOR_TEXT_DIM, anchor="w", justify="left", wraplength=800,
-        ).pack(fill="x", padx=8, pady=(2, 6))
+            text_color=COLOR_TEXT_DIM, anchor="w", justify="left",
+        )).pack(fill="x", padx=8, pady=(2, 6))
 
         row = ctk.CTkFrame(imp, fg_color="transparent")
         row.pack(fill="x", padx=8, pady=(0, 6))
@@ -129,9 +130,9 @@ class ShareMixin:
         self.import_progress = ctk.CTkProgressBar(
             imp, progress_color=COLOR_ORANGE, fg_color=COLOR_ROW,
         )
-        self.import_status = ctk.CTkLabel(
-            imp, text="", text_color=COLOR_TEXT, anchor="w", justify="left", wraplength=800,
-        )
+        self.import_status = wrap_to_width(ctk.CTkLabel(
+            imp, text="", text_color=COLOR_TEXT, anchor="w", justify="left",
+        ))
         self.import_status.pack(fill="x", padx=8, pady=(0, 8))
 
         self._import_profiles = None
