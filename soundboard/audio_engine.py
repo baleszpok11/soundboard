@@ -31,6 +31,7 @@ LIMITER_RELEASE_S = 0.3
 # full of short clips does not pump the voice in and out.
 DUCK_ATTACK_S = 0.06
 DUCK_RELEASE_S = 0.35
+STOP_FADE_S = 0.08  # a stop is a quick fade, not a cut: long enough to lose the click
 DUCK_MIN_DB = 3
 DUCK_MUTE_DB = 40  # the top of the control is a real mute, not 40 dB down
 STREAM_TIMEOUT_S = 2.0  # a running stream with no callbacks for this long is treated as lost
@@ -93,13 +94,71 @@ def test_tone(seconds=TEST_TONE_S, hz=TEST_TONE_HZ):
     return (wave * fade).reshape(-1, 1).repeat(CHANNELS, axis=1)
 
 
+class Fades(collections.namedtuple("Fades", "fade_in fade_out crossfade")):
+    """Per-sound fade times in seconds. All zero is what a board without
+    any of these keys gets, and is exactly the old behaviour."""
+
+    __slots__ = ()
+
+    def __new__(cls, fade_in=0.0, fade_out=0.0, crossfade=0.0):
+        return super().__new__(cls, max(0.0, fade_in), max(0.0, fade_out),
+                               max(0.0, crossfade))
+
+    @property
+    def idle(self):
+        return not (self.fade_in or self.fade_out or self.crossfade)
+
+
+NO_FADES = Fades()
+
+
 class _ActiveSound:
-    def __init__(self, data, key=None, gain=1.0, loop=False):
+    """One clip on its way to the output, with its own envelope.
+
+    Three things shape it, and they multiply: the fade in over the first
+    `fade_in` seconds, the fade out over the last `fade_out` seconds, and
+    the fade that a stop asks for, which can begin at any point. A
+    looping clip fades in once rather than on every pass, and never fades
+    out, because it has no end to fade at - the seam is what it gets
+    instead.
+    """
+
+    def __init__(self, data, key=None, gain=1.0, loop=False, fades=NO_FADES):
         self.data = data
         self.key = key
         self.gain = gain
         self.loop = loop
         self.position = 0
+        self.played = 0  # frames emitted, counted across loop passes
+        self.stopping = False
+        self._fade_in = int(fades.fade_in * SAMPLE_RATE)
+        self._fade_out = int(fades.fade_out * SAMPLE_RATE)
+        self._stop_total = 0
+        self._stop_left = 0
+        self._passes = 0
+        # The loop seam: the clip's tail faded into its head, played in
+        # place of the head on every pass but the first, so a loop that
+        # was not cut at a zero crossing does not tick once a bar. Only
+        # the overlap is kept, not a second copy of the clip.
+        self._seam = None
+        self._body = len(data)
+        if loop and fades.crossfade > 0 and len(data) > 1:
+            overlap = min(int(fades.crossfade * SAMPLE_RATE), len(data) // 2)
+            if overlap > 0:
+                self._body = len(data) - overlap
+                ramp = np.linspace(0.0, 1.0, overlap, dtype=np.float32)[:, None]
+                tail = data[self._body:self._body + overlap]
+                self._seam = (tail * (1.0 - ramp) + data[:overlap] * ramp).astype(np.float32)
+
+    def begin_stop(self, frames):
+        """Start fading out towards silence over this many frames. The
+        mixer keeps reading until the envelope lands, so a stop is a fade
+        rather than a cut; zero frames still stops it dead."""
+        if self.stopping:
+            return  # a second stop must not restart the fade
+        self.stopping = True
+        self._stop_total = max(0, frames)
+        self._stop_left = self._stop_total
 
     def read(self, frames):
         channels = self.data.shape[1]
@@ -107,24 +166,75 @@ class _ActiveSound:
             # An empty clip has nothing to wrap around, so looping it
             # would spin forever.
             return np.zeros((frames, channels), dtype=np.float32), True
-        parts = []
-        needed = frames
-        while needed > 0:
-            end = min(self.position + needed, len(self.data))
-            parts.append(self.data[self.position:end])
-            needed -= end - self.position
-            self.position = end
-            if self.position < len(self.data):
-                continue
-            if not self.loop:
-                break
-            self.position = 0  # wrap and keep filling the same block
-        chunk = np.concatenate(parts) * self.gain if parts else np.zeros((0, channels), dtype=np.float32)
+        if self.stopping and self._stop_left <= 0:
+            return np.zeros((frames, channels), dtype=np.float32), True
+        start_played, start_position = self.played, self.position
+        chunk = self._pull(frames)
         finished = not self.loop and self.position >= len(self.data)
+        if len(chunk):
+            envelope = self._envelope(len(chunk), start_played, start_position)
+            chunk = chunk * envelope if envelope is not None else chunk * self.gain
+        self.played += len(chunk)
+        if self.stopping:
+            self._stop_left -= len(chunk)
+            finished = finished or self._stop_left <= 0
         if len(chunk) < frames:
             pad = np.zeros((frames - len(chunk), channels), dtype=np.float32)
             chunk = np.vstack([chunk, pad]) if len(chunk) else pad
         return chunk, finished
+
+    def _pull(self, frames):
+        """The audio itself, wrapping a looping clip as many times as the
+        block needs. Advances `position`; the envelope is applied by the
+        caller, which kept the position this started at."""
+        parts = []
+        needed = frames
+        while needed > 0:
+            end = min(self.position + needed, self._body)
+            parts.append(self._piece(self.position, end))
+            needed -= end - self.position
+            self.position = end
+            if self.position < self._body:
+                continue
+            if not self.loop:
+                break
+            self.position = 0  # wrap and keep filling the same block
+            self._passes += 1
+        channels = self.data.shape[1]
+        if not parts:
+            return np.zeros((0, channels), dtype=np.float32)
+        return np.concatenate(parts) if len(parts) > 1 else parts[0]
+
+    def _piece(self, start, end):
+        """Clip audio from `start` to `end`, with the crossfaded seam in
+        place of the head once the clip has wrapped at least once."""
+        if self._seam is None or not self._passes or start >= len(self._seam):
+            return self.data[start:end]
+        seamed = self._seam[start:min(end, len(self._seam))]
+        if end <= len(self._seam):
+            return seamed
+        return np.concatenate([seamed, self.data[len(self._seam):end]])
+
+    def _envelope(self, n, start_played, start_position):
+        """The block's gain, or None when nothing shapes it and the flat
+        gain will do. Multiplied together so a stop lands on top of
+        whatever fade was already running."""
+        envelope = None
+        if self._fade_in and start_played < self._fade_in:
+            steps = (start_played + np.arange(n, dtype=np.float32)) / self._fade_in
+            envelope = np.clip(steps, 0.0, 1.0)
+        # A looping clip has no end to fade out at; the seam covers its wrap.
+        if self._fade_out and not self.loop:
+            left = len(self.data) - (start_position + np.arange(n, dtype=np.float32))
+            out = np.clip(left / self._fade_out, 0.0, 1.0)
+            envelope = out if envelope is None else envelope * out
+        if self.stopping and self._stop_total:
+            left = self._stop_left - np.arange(n, dtype=np.float32)
+            stop = np.clip(left / self._stop_total, 0.0, 1.0)
+            envelope = stop if envelope is None else envelope * stop
+        if envelope is None:
+            return None
+        return (envelope * self.gain).astype(np.float32)[:, None]
 
 
 class _Limiter:
@@ -309,6 +419,7 @@ class AudioEngine:
         self.mic_enabled = True  # False while muted or push-to-talk isn't held
         self._mic_level = 1.0  # gain applied to the last block, for smooth changes
         self.sound_gain = 1.0
+        self.stop_fade_s = STOP_FADE_S  # how long stop_all and stop_key take
         self.mic_effects = _MicEffectChain()
         self._ducker = _Ducker()
         self._output_limiter = _Limiter()
@@ -420,10 +531,12 @@ class AudioEngine:
                 lost.append(name)
         return lost
 
-    def stop_all(self):
-        with self._lock:
-            self._active_sounds = []
-            self._active_sounds_monitor = []
+    def stop_all(self, fade_s=None):
+        """Fade everything out rather than cutting it dead. The clips stay
+        in the mix until their envelopes land, which is what makes a panic
+        key sound like a fade. `fade_s` of 0 still stops them where they
+        are, which is what a profile switch or a device change wants."""
+        self._begin_stop(lambda sound: True, fade_s)
 
     def set_loop(self, key, loop):
         """Change looping on clips already playing, so switching it off
@@ -433,10 +546,25 @@ class AudioEngine:
                 if sound.key == key:
                     sound.loop = loop
 
-    def stop_key(self, key):
+    def stop_key(self, key, fade_s=None):
+        self._begin_stop(lambda sound: sound.key == key, fade_s)
+
+    def _begin_stop(self, matches, fade_s):
+        # None means the configured fade; the callers that want a clean
+        # cut ask for 0 rather than knowing what the setting is.
+        if fade_s is None:
+            fade_s = self.stop_fade_s
+        frames = int(max(0.0, fade_s) * SAMPLE_RATE)
         with self._lock:
-            self._active_sounds = [s for s in self._active_sounds if s.key != key]
-            self._active_sounds_monitor = [s for s in self._active_sounds_monitor if s.key != key]
+            if not frames:
+                # No fade asked for: drop them now, as this always did.
+                self._active_sounds = [s for s in self._active_sounds if not matches(s)]
+                self._active_sounds_monitor = [
+                    s for s in self._active_sounds_monitor if not matches(s)]
+                return
+            for sound in (*self._active_sounds, *self._active_sounds_monitor):
+                if matches(sound):
+                    sound.begin_stop(frames)
 
     def active_keys(self):
         """Every key currently playing, mapped to how far that clip has
@@ -445,7 +573,10 @@ class AudioEngine:
         progress = {}
         with self._lock:
             for sound in (*self._active_sounds, *self._active_sounds_monitor):
-                if sound.key is None or not len(sound.data):
+                # A clip that has been told to stop is already gone as far
+                # as the board is concerned: its row should not keep
+                # showing as playing for the length of the fade.
+                if sound.key is None or sound.stopping or not len(sound.data):
                     continue
                 fraction = min(1.0, sound.position / len(sound.data))
                 if fraction > progress.get(sound.key, -1.0):
@@ -457,7 +588,7 @@ class AudioEngine:
         when nothing with that key is playing."""
         with self._lock:
             for sound in (*self._active_sounds, *self._active_sounds_monitor):
-                if sound.key == key and len(sound.data):
+                if sound.key == key and not sound.stopping and len(sound.data):
                     return min(1.0, sound.position / len(sound.data))
         return None
 
@@ -654,14 +785,14 @@ class AudioEngine:
             return np.zeros((0, self.input_channels), dtype=np.float32)
         return np.concatenate(parts)
 
-    def play_data(self, data, samplerate, key=None, gain=1.0, loop=False):
+    def play_data(self, data, samplerate, key=None, gain=1.0, loop=False, fades=NO_FADES):
         """Queue audio for playback. A clip with the same key that is
         still playing is stopped first, so re-triggering restarts it."""
         if self.output_stream is None and self.monitor_stream is None:
             raise RuntimeError("No output device selected.")
-        self._queue_clip(_resample(data, samplerate, SAMPLE_RATE), key, gain, loop)
+        self._queue_clip(_resample(data, samplerate, SAMPLE_RATE), key, gain, loop, fades)
 
-    def _queue_clip(self, resampled, key, gain, loop=False):
+    def _queue_clip(self, resampled, key, gain, loop=False, fades=NO_FADES):
         main_data = _match_channels(resampled, self.output_channels)
         monitor_data = _match_channels(resampled, self.monitor_channels)
         with self._lock:
@@ -669,32 +800,32 @@ class AudioEngine:
                 self._active_sounds = [s for s in self._active_sounds if s.key != key]
                 self._active_sounds_monitor = [s for s in self._active_sounds_monitor if s.key != key]
             if self.output_stream is not None:
-                self._active_sounds.append(_ActiveSound(main_data, key, gain, loop))
+                self._active_sounds.append(_ActiveSound(main_data, key, gain, loop, fades))
             if self.monitor_stream is not None and not self.monitor_muted:
-                self._active_sounds_monitor.append(_ActiveSound(monitor_data, key, gain, loop))
+                self._active_sounds_monitor.append(_ActiveSound(monitor_data, key, gain, loop, fades))
 
-    def play(self, path, gain=1.0, loop=False, key=None):
+    def play(self, path, gain=1.0, loop=False, key=None, fades=NO_FADES):
         """Queue a file for playback without blocking the caller. Errors
         are reported through on_error. `key` identifies what is playing
         for stopping and restarting; it defaults to the file, which a
         board entry that can play several files overrides so all of them
         answer to the one entry."""
-        self._requests.put((path, gain, True, loop, key))
+        self._requests.put((path, gain, True, loop, key, fades))
 
     def preload(self, paths):
         """Decode files into the cache in the background."""
         for path in paths:
-            self._requests.put((path, 1.0, False, False, None))
+            self._requests.put((path, 1.0, False, False, None, NO_FADES))
 
     def _worker(self):
         while True:
-            path, gain, play, loop, key = self._requests.get()
+            path, gain, play, loop, key, fades = self._requests.get()
             try:
                 if play and self.output_stream is None and self.monitor_stream is None:
                     raise RuntimeError("No output device selected.")
                 data = self._load_clip(path)
                 if play:
-                    self._queue_clip(data, key or os.path.abspath(path), gain, loop)
+                    self._queue_clip(data, key or os.path.abspath(path), gain, loop, fades)
             except FileNotFoundError:
                 if play and self.on_error is not None:
                     self.on_error(f"File not found: {path}")

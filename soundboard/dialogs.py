@@ -35,6 +35,7 @@ from .theme import (
     COLOR_SURFACE,
     COLOR_TEXT,
     COLOR_TEXT_DIM,
+    FADE_SLIDER_MAX_S,
     VOLUME_MAX,
     font,
     register_tk,
@@ -137,6 +138,95 @@ class TextDialog(ctk.CTkToplevel):
     def get(self):
         self.wait_window()
         return self.result
+
+
+class FadeDialog(ctk.CTkToplevel):
+    """One sound's fade times, on three sliders.
+
+    Like VolumeDialog, each slider applies as it moves and there is
+    nothing to confirm. The crossfade slider is disabled unless the sound
+    loops, because a clip that stops at its end has no wrap to smooth.
+    """
+
+    def __init__(self, parent, name, fades, looping, on_change):
+        super().__init__(parent)
+        self.title("Fades")
+        self.configure(fg_color=COLOR_SURFACE)
+        self.resizable(False, False)
+        self._on_change = on_change
+        self._values = dict(fades)
+
+        ctk.CTkLabel(
+            self, text=name, text_color=COLOR_TEXT, anchor="w",
+            font=font("body_bold"),
+        ).pack(anchor="w", padx=16, pady=(16, 0))
+
+        self._rows = {}
+        for key, label, enabled in (
+            ("fade_in", "Fade in", True),
+            ("fade_out", "Fade out", True),
+            ("crossfade", "Loop crossfade", looping),
+        ):
+            self._add_row(key, label, enabled)
+
+        if not looping:
+            ctk.CTkLabel(
+                self, text="Turn on Loop to use a crossfade.",
+                text_color=COLOR_TEXT_DIM, font=font("small"), anchor="w",
+            ).pack(anchor="w", padx=16)
+
+        ctk.CTkButton(
+            self, text="Done", width=90, command=self.destroy,
+            fg_color=COLOR_ORANGE, hover_color=COLOR_ORANGE_HOVER,
+            text_color=COLOR_ON_ACCENT,
+        ).pack(anchor="e", padx=16, pady=(8, 16))
+
+        self.bind("<Escape>", lambda e: self.destroy())
+        self.transient(parent)
+        center_on_parent(self, parent)
+        self.after(50, self._focus)
+
+    def _add_row(self, key, label, enabled):
+        row = ctk.CTkFrame(self, fg_color="transparent")
+        row.pack(fill="x", padx=16, pady=(8, 0))
+        ctk.CTkLabel(
+            row, text=label, text_color=COLOR_TEXT_DIM, font=font("small"),
+            width=104, anchor="w",
+        ).pack(side="left")
+        value_label = ctk.CTkLabel(
+            row, text=self._text(self._values.get(key, 0.0)),
+            text_color=COLOR_TEXT_DIM, font=font("small"), width=46,
+        )
+        # Tenths of a second up to FADE_SLIDER_MAX_S: finer than that is
+        # not something anyone sets by ear on a soundboard.
+        slider = ctk.CTkSlider(
+            row, from_=0, to=FADE_SLIDER_MAX_S, width=220,
+            number_of_steps=int(FADE_SLIDER_MAX_S * 10),
+            command=lambda value, k=key: self._changed(k, value),
+        )
+        slider.set(self._values.get(key, 0.0))
+        if not enabled:
+            slider.configure(state="disabled")
+        slider.pack(side="left")
+        value_label.pack(side="left", padx=(8, 0))
+        self._rows[key] = (slider, value_label)
+
+    @staticmethod
+    def _text(seconds):
+        return "none" if not seconds else f"{seconds:.1f}s"
+
+    def _changed(self, key, value):
+        seconds = round(value, 1)
+        self._values[key] = seconds
+        self._rows[key][1].configure(text=self._text(seconds))
+        self._on_change(key, seconds)
+
+    def _focus(self):
+        self._rows["fade_in"][0].focus_force()
+        try:
+            self.grab_set()
+        except tk.TclError:
+            self.after(50, self._focus)
 
 
 class VolumeDialog(ctk.CTkToplevel):

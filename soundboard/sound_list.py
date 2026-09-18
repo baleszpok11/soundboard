@@ -15,7 +15,7 @@ from tkinter import filedialog
 import customtkinter as ctk
 import soundfile as sf
 
-from .audio_engine import RECORD_MAX_S, REPLAY_S, SAMPLE_RATE
+from .audio_engine import RECORD_MAX_S, REPLAY_S, SAMPLE_RATE, Fades
 from .config import (
     NEW_SOUND_VOLUME,
     SOUNDS_DIR,
@@ -24,6 +24,7 @@ from .config import (
     resolve_sound_path,
     same_file,
     set_sound_loudness,
+    sound_fades,
     sound_loudness,
     sound_paths,
     sanitize_filename,
@@ -31,6 +32,7 @@ from .config import (
     unique_path,
 )
 from .dialogs import (
+    FadeDialog,
     TextDialog,
     VolumeDialog,
     ask_yes_no,
@@ -520,6 +522,7 @@ class SoundListMixin:
             label="Loop", variable=self._loop_var,
             command=lambda: self._set_loop(index, self._loop_var.get()),
         )
+        menu.add_command(label="Fades...", command=lambda: self.set_fades(index))
         menu.add_command(label="Re-measure loudness",
                          command=lambda: self.remeasure_sound(index))
         menu.add_command(label="Rename...", command=lambda: self.rename_sound(index))
@@ -966,6 +969,23 @@ class SoundListMixin:
                 except OSError as e:
                     error(self.root, "Could not delete file", str(e))
 
+    def set_fades(self, index):
+        """Fade in, fade out and the loop crossfade for one sound. Applies
+        as the sliders move, like the volume dialog, and reaches a clip
+        that is already playing only the next time it is triggered - an
+        envelope cannot be rewritten underneath a clip halfway through."""
+        sound = self.sounds[index]
+
+        def changed(key, seconds):
+            if seconds:
+                sound[key] = seconds
+            else:
+                sound.pop(key, None)
+            self._save_config_soon()
+
+        FadeDialog(self.root, sound["name"], sound_fades(sound),
+                   sound.get("loop", False), changed)
+
     # -- loudness ------------------------------------------------------------
 
     def _measure_sounds(self, entries, force=False, on_done=None):
@@ -1051,6 +1071,7 @@ class SoundListMixin:
         self.audio_engine.play(
             resolve_sound_path(path),
             gain=self._clip_gain(sound, path), loop=sound.get("loop", False), key=key,
+            fades=Fades(**sound_fades(sound)),
         )
 
     def _pick_clip(self, sound, key):

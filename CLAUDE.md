@@ -101,6 +101,17 @@ virtual audio cable.
   never spoken. A machine with no engine (a bare Linux without eSpeak)
   is normal - the tab says so instead of failing at the button. Like
   pynput, the driver is a runtime import, so each build names its own
+- Fades: _ActiveSound owns its envelope - fade in by frames played, fade
+  out by position from the end, and a stop fade that can start anywhere;
+  the three multiply. A looping clip fades in once and never fades out,
+  because it has no end: its wrap is covered by _seam, the tail blended
+  into the head and played in place of the head on every pass but the
+  first (only the overlap is stored, not a second copy). stop_key and
+  stop_all mark a clip stopping and let the mixer drop it when the
+  envelope lands, so active_keys()/playback_progress() skip a stopping
+  clip - its row must stop showing as playing at once, not when the fade
+  ends. A fade of 0 still drops immediately, which is what a profile
+  switch wants
 - Ducking: _Ducker in audio_engine.py drops the mic while anything is in
   _active_sounds, applied in _on_output only - the monitor callback
   carries clips alone, so what reaches the cable ducks and what you hear

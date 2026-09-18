@@ -9,7 +9,7 @@ import webbrowser
 from .dialogs import error
 import customtkinter as ctk
 
-from .audio_engine import SAMPLE_RATE, sd, test_tone
+from .audio_engine import SAMPLE_RATE, STOP_FADE_S, sd, test_tone
 from .config import save_config
 from .dsp import LOUDNESS_TARGET_LUFS, measure_loudness
 from .theme import (
@@ -458,6 +458,7 @@ class DeviceMixin:
             monitor_device = None
         self.audio_engine.mic_gain = self.config["mic_volume"] / 100
         self.audio_engine.sound_gain = self.config["sound_volume"] / 100
+        self.audio_engine.stop_fade_s = self.config.get("stop_fade", STOP_FADE_S)
         self.audio_engine.start(input_device, output_device, monitor_device)
         self.audio_engine.set_monitor_muted(not self.config.get("hear_self", True))
         self._update_device_warnings()
