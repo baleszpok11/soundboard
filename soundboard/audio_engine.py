@@ -26,6 +26,8 @@ CLIP_CACHE_BYTES = 512 * 1024 * 1024  # decoded clips kept in memory
 LIMITER_CEILING = 0.89  # about -1 dBFS
 LIMITER_RELEASE_S = 0.3
 STREAM_TIMEOUT_S = 2.0  # a running stream with no callbacks for this long is treated as lost
+RECORD_MAX_S = 180  # a forgotten recording stops here instead of filling memory
+RECORD_MIN_S = 0.2  # shorter than this is a mis-click, not a clip
 TEST_TONE_S = 0.8
 TEST_TONE_HZ = 440.0
 TEST_TONE_LEVEL = 0.4
@@ -144,6 +146,11 @@ class AudioEngine:
         self._mic_buffer = collections.deque()
         self._mic_frames = 0
         self._mic_ready = False
+        # Raw mic blocks kept while recording a clip: None when idle, so
+        # the input callback can tell the two apart in one check.
+        self._recording = None
+        self._recording_frames = 0
+        self._recording_channels = 0
         self._active_sounds = []
         self._active_sounds_monitor = []
         self.dropouts = 0
@@ -305,6 +312,37 @@ class AudioEngine:
                     return min(1.0, sound.position / len(sound.data))
         return None
 
+    def start_recording(self):
+        """Begin keeping the raw mic blocks the input callback receives.
+        Recording is taken before mute, push-to-talk and the mic volume,
+        so a muted mic still records what it hears. False when there is
+        no microphone running to record from."""
+        with self._lock:
+            if self.input_stream is None:
+                return False
+            self._recording = []
+            self._recording_frames = 0
+            self._recording_channels = self.input_channels
+            return True
+
+    def recording_seconds(self):
+        """How long the recording in progress is, or None when idle."""
+        with self._lock:
+            if self._recording is None:
+                return None
+            return self._recording_frames / SAMPLE_RATE
+
+    def stop_recording(self):
+        """Stop and return what was captured as float32 frames, or None
+        if nothing worth keeping came in."""
+        with self._lock:
+            parts, self._recording = self._recording, None
+            self._recording_frames = 0
+        if not parts:
+            return None
+        data = np.concatenate(parts)
+        return data if len(data) >= RECORD_MIN_S * SAMPLE_RATE else None
+
     def set_monitor_muted(self, muted):
         with self._lock:
             self.monitor_muted = muted
@@ -317,10 +355,19 @@ class AudioEngine:
             if status:
                 self.dropouts += 1
             self.input_peak = float(np.abs(indata).max()) if indata.size else 0.0
-            self._mic_buffer.append(indata.copy())
-            self._mic_frames += len(indata)
+            # One copy serves both: the mixer only ever reads these blocks
+            # (_take_mic concatenates into a fresh array before anything
+            # scales it), so the recording cannot be altered underneath.
+            block = indata.copy()
+            self._mic_buffer.append(block)
+            self._mic_frames += len(block)
             while self._mic_frames > MIC_MAX_FRAMES:
                 self._mic_frames -= len(self._mic_buffer.popleft())
+            if (self._recording is not None
+                    and self._recording_frames < RECORD_MAX_S * SAMPLE_RATE
+                    and block.shape[1] == self._recording_channels):
+                self._recording.append(block)
+                self._recording_frames += len(block)
 
     def _on_output(self, outdata, frames, time_info, status):
         self._last_callback["output"] = time.monotonic()

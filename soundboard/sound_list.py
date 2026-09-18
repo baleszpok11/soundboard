@@ -6,11 +6,14 @@ import os
 import shutil
 import sys
 import textwrap
+import time
 import tkinter as tk
 from tkinter import filedialog, messagebox
 
 import customtkinter as ctk
+import soundfile as sf
 
+from .audio_engine import RECORD_MAX_S, SAMPLE_RATE
 from .config import (
     NEW_SOUND_VOLUME,
     SOUNDS_DIR,
@@ -47,6 +50,7 @@ from .theme import (
 )
 
 PLAYING_POLL_MS = 100  # how often the board re-reads what the engine is playing
+RECORD_POLL_MS = 200  # how often the Record button's elapsed time is redrawn
 
 
 class SoundListMixin:
@@ -562,6 +566,12 @@ class SoundListMixin:
             frame, text="Add sound", command=self.add_sound,
             fg_color=COLOR_ORANGE, hover_color=COLOR_ORANGE_HOVER, text_color=COLOR_ON_ACCENT,
         ).pack(side="left")
+        self.record_button = ctk.CTkButton(
+            frame, text="Record", width=90, command=self.toggle_record,
+            fg_color=COLOR_ROW, hover_color=COLOR_ROW_HOVER, text_color=COLOR_TEXT,
+            border_width=1, border_color=COLOR_BORDER,
+        )
+        self.record_button.pack(side="left", padx=(8, 0))
         ctk.CTkButton(
             frame, text="Stop all", command=self.audio_engine.stop_all,
             fg_color=COLOR_ERROR, hover_color=COLOR_ERROR_HOVER, text_color=COLOR_ON_ERROR,
@@ -614,6 +624,74 @@ class SoundListMixin:
             return
         name = os.path.splitext(os.path.basename(path))[0]
         self._add_sound_entry(name, stored_path)
+
+    # -- recording ----------------------------------------------------------
+
+    def toggle_record(self):
+        """Record the microphone straight into the board. What is captured
+        is the mic alone, before mute and push-to-talk, so a muted mic
+        still records and the soundboard's own clips stay out of it."""
+        if self.audio_engine.recording_seconds() is not None:
+            self._finish_recording()
+            return
+        if not self.audio_engine.start_recording():
+            messagebox.showinfo(
+                "No microphone",
+                "Choose an input device above and wait for it to start "
+                "before recording.",
+            )
+            return
+        self._update_record_button()
+        self._poll_recording()
+
+    def _poll_recording(self):
+        seconds = self.audio_engine.recording_seconds()
+        if seconds is None:
+            return  # stopped from elsewhere
+        if seconds >= RECORD_MAX_S:
+            self._finish_recording(capped=True)
+            return
+        self._update_record_button(seconds)
+        self.root.after(RECORD_POLL_MS, self._poll_recording)
+
+    def _update_record_button(self, seconds=0.0):
+        if self.audio_engine.recording_seconds() is None:
+            self.record_button.configure(
+                text="Record", fg_color=COLOR_ROW, hover_color=COLOR_ROW_HOVER,
+                text_color=COLOR_TEXT, border_width=1,
+            )
+            return
+        self.record_button.configure(
+            text=f"Stop {int(seconds) // 60}:{int(seconds) % 60:02d}",
+            fg_color=COLOR_ERROR, hover_color=COLOR_ERROR_HOVER,
+            text_color=COLOR_ON_ERROR, border_width=0,
+        )
+
+    def _finish_recording(self, capped=False):
+        data = self.audio_engine.stop_recording()
+        self._update_record_button()
+        if data is None:
+            messagebox.showinfo(
+                "Nothing recorded",
+                "The recording was too short to keep. Check that the input "
+                "device is the microphone you are speaking into.",
+            )
+            return
+        name = time.strftime("Recording %Y-%m-%d %H.%M.%S")
+        try:
+            ensure_sounds_dir()
+            dest = unique_path(os.path.join(SOUNDS_DIR, sanitize_filename(name + ".wav")))
+            sf.write(dest, data, SAMPLE_RATE)
+        except OSError as e:
+            messagebox.showerror("Could not save recording", str(e))
+            return
+        self._add_sound_entry(name, os.path.basename(dest))
+        if capped:
+            messagebox.showinfo(
+                "Recording stopped",
+                f"Recordings stop after {RECORD_MAX_S // 60} minutes. "
+                f"'{name}' was added to your board.",
+            )
 
     def _find_sound(self, path):
         """The board entry that plays this file, if any."""
