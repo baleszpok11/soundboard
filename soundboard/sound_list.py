@@ -42,6 +42,7 @@ from .dialogs import (
     warn,
 )
 from .dsp import match_gain, measure_file
+from .virtual_list import VirtualList
 from .theme import (
     CARD_BORDER,
     COLOR_BG,
@@ -66,6 +67,8 @@ from .theme import (
 )
 
 PLAYING_POLL_MS = 100  # how often the board re-reads what the engine is playing
+ROW_PAD_X, ROW_PAD_Y = 2, 3  # gap around a list row, was its pack padding
+TILE_PAD = 4  # gap around a grid tile, was its grid padding
 RECORD_POLL_MS = 200  # how often the Record button's elapsed time is redrawn
 _length_cache = {}  # (path, mtime, size) -> "m:ss", so a redraw doesn't re-read every file
 AUDIO_EXTENSIONS = (".wav", ".flac", ".ogg", ".mp3")
@@ -244,23 +247,19 @@ class SoundListMixin:
         # No label bar: it was a full-width strip of chrome restating the
         # name of the tab it sits in. The rows read as cards against the
         # tab's own background instead.
-        self.list_frame = ctk.CTkScrollableFrame(parent, fg_color=COLOR_BG)
+        # Only the rows that fit on screen are ever built; see
+        # virtual_list.py for why a scrollable frame cannot be used here.
+        self.list_frame = VirtualList(
+            parent, self._show_sound_window, on_resize=self._on_list_resize,
+            fg_color=COLOR_BG)
         self.list_frame.pack(fill="both", expand=True, padx=2, pady=(0, GAP))
         self._grid_columns = 0
-        # add="+" matters: CTkScrollableFrame binds <Configure> on this same
-        # frame to refresh the canvas scrollregion. Replacing that binding
-        # leaves the region empty, and an empty region means the canvas
-        # believes everything fits - no scrollbar, no wheel, and every row
-        # past the first screenful unreachable.
-        self.list_frame.bind("<Configure>", self._on_list_resize, add="+")
-        # One box per view, because the rows pack and the tiles grid, and
-        # Tk refuses both geometry managers in the same container. Each
-        # keeps its pooled slots while the other view is on screen.
-        self.rows_box = ctk.CTkFrame(self.list_frame, fg_color="transparent")
-        self.tiles_box = ctk.CTkFrame(self.list_frame, fg_color="transparent")
         self.empty_label = ctk.CTkLabel(self.list_frame, text="", text_color=COLOR_TEXT_DIM)
         self._row_pool = []
         self._tile_pool = []
+        self._visible = []  # what the search leaves, shared with the window callback
+        self._row_pitch = 0
+        self._tile_pitch = 0
         self._drag_from = None
         self._playing_widgets = {}
         self._last_clip = {}  # group key -> the member that played last
@@ -314,12 +313,14 @@ class SoundListMixin:
         self._refresh_sound_list()
 
     def _grid_column_count(self):
-        width = self.list_frame.winfo_width()
+        width = self.list_frame.viewport_width()
         return max(1, width // 190) if width > 1 else 4
 
-    def _on_list_resize(self, _event):
-        if self.config["sound_view"] == "grid" and self._grid_column_count() != self._grid_columns:
-            self._refresh_sound_list()
+    def _on_list_resize(self):
+        """The canvas changed width: the cells have to be re-measured
+        before the scroller works out what is on screen. Called from the
+        scroller's own <Configure>, which then syncs."""
+        self._set_list_shape()
 
     def _visible_sounds(self):
         """(index, sound) pairs matching the search box."""
@@ -330,79 +331,100 @@ class SoundListMixin:
         ]
 
     def _refresh_sound_list(self):
-        """Point the pooled rows or tiles at whatever the search leaves
-        visible. The widgets are reused rather than rebuilt: tearing them
-        down and making new ones costs Tk more every time it happens, and
-        this runs on every search keystroke."""
-        visible = self._visible_sounds()
-        grid = self.config["sound_view"] == "grid"
-        self._playing_widgets = {}  # rebound below; the poll reads it
-        if visible:
+        """Take what the search leaves and hand it to the scroller. The
+        widgets are not built here: the scroller calls back with the
+        slice that is actually on screen, which is all that gets built."""
+        self._visible = self._visible_sounds()
+        if self._visible:
             if self.empty_label.winfo_manager():
-                self.empty_label.pack_forget()
+                self.empty_label.place_forget()
         else:
             self.empty_label.configure(text=(
                 "No sounds match your search." if self.sounds
                 else "No sounds yet. Click Add sound or use the Download tab."))
             if not self.empty_label.winfo_manager():
-                self.empty_label.pack(pady=20)
-        # The unused view keeps its slots, unmapped, for when it comes back.
-        self._fill_tiles(visible if grid else [])
-        self._fill_rows([] if grid else visible)
-        # An empty box would still claim its share of the cavity, so only
-        # the one holding this view's slots is mapped.
-        for box, wanted in ((self.tiles_box, grid), (self.rows_box, not grid)):
-            if wanted and visible and not box.winfo_manager():
-                box.pack(fill="both", expand=True)
-            elif (not wanted or not visible) and box.winfo_manager():
-                box.pack_forget()
+                self.empty_label.place(relx=0.5, y=20, anchor="n")
+        # A shorter list can leave the view scrolled past its own end,
+        # which would come back as an empty board.
+        self.list_frame.scroll_to_top()
+        self._set_list_shape()
+        self.list_frame.sync(force=True)
         if hasattr(self, "editor_sound_menu"):
             self._refresh_editor_sound_list()
         if hasattr(self, "export_summary"):
             self._update_export_summary()
-        # Without this the rebound slots would show the previous sound's
+
+    def _set_list_shape(self):
+        """Tell the scroller how many cells there are and how big one is.
+        A cell is measured from a real slot rather than assumed, so a
+        change of font or theme metric moves the rows with it."""
+        grid = self.config["sound_view"] == "grid"
+        width = max(1, self.list_frame.viewport_width())
+        if grid:
+            self._grid_columns = self._grid_column_count()
+            pitch_y = self._tile_pitch or self._measure_tile()
+            self.list_frame.set_content(
+                len(self._visible), self._grid_columns, width // self._grid_columns, pitch_y)
+        else:
+            pitch_y = self._row_pitch or self._measure_row()
+            self.list_frame.set_content(len(self._visible), 1, width, pitch_y)
+
+    @staticmethod
+    def _pitch_of(widget, pad):
+        """A cell's height, measured from a real one.
+
+        The idle pass matters: a CTkFrame starts out asking for its
+        default 200px and only shrinks to what its children need once Tk
+        has run the geometry propagation, so measuring before that spaces
+        the whole list six rows apart.
+        """
+        widget.update_idletasks()
+        return widget.winfo_reqheight() + 2 * pad
+
+    def _measure_row(self):
+        if not self._row_pool:
+            self._row_pool.append(self._make_row())
+        self._row_pitch = self._pitch_of(self._row_pool[0]["outer"], ROW_PAD_Y)
+        return self._row_pitch
+
+    def _measure_tile(self):
+        if not self._tile_pool:
+            self._tile_pool.append(self._make_tile())
+        self._tile_pitch = self._pitch_of(self._tile_pool[0]["cell"], TILE_PAD)
+        return self._tile_pitch
+
+    def _show_sound_window(self, first, needed):
+        """The scroller's callback: bind `needed` slots to the sounds
+        starting at `first` and put them where those items belong. Every
+        other slot is hidden rather than destroyed."""
+        grid = self.config["sound_view"] == "grid"
+        pool = self._tile_pool if grid else self._row_pool
+        make = self._make_tile if grid else self._make_row
+        bind = self._bind_tile if grid else self._bind_row
+        key = "cell" if grid else "outer"
+        pad = TILE_PAD if grid else ROW_PAD_X
+        pad_y = TILE_PAD if grid else ROW_PAD_Y
+        self._playing_widgets = {}  # rebound below; the poll reads it
+        while len(pool) < needed:
+            pool.append(make())
+        window = self._visible[first:first + needed]
+        for position, (slot, (idx, sound)) in enumerate(zip(pool, window)):
+            bind(slot, idx, sound)
+            self.list_frame.place_slot(slot[key], slot["item"], first + position,
+                                       pad_x=pad, pad_y=pad_y)
+            slot["mapped"] = True
+        for slot in pool[len(window):]:
+            if slot["mapped"]:
+                self.list_frame.hide(slot["item"])
+                slot["mapped"] = False
+        # The other view's slots stay built but off screen.
+        for slot in (self._row_pool if grid else self._tile_pool):
+            if slot["mapped"]:
+                self.list_frame.hide(slot["item"])
+                slot["mapped"] = False
+        # Without this a rebound slot would show the previous sound's
         # progress and Stop button until the next poll.
         self._update_playing()
-
-    def _fill_rows(self, visible):
-        while len(self._row_pool) < len(visible):
-            self._row_pool.append(self._make_row())
-        for slot, (idx, sound) in zip(self._row_pool, visible):
-            self._bind_row(slot, idx, sound)
-            if not slot["mapped"]:
-                # Only the tail is ever unmapped, so the packed slots stay
-                # in pool order and a repacked slot cannot jump to the end.
-                slot["outer"].pack(fill="x", pady=3, padx=2)
-                slot["mapped"] = True
-        # Tracked here rather than asked of Tk: winfo_manager() is a round
-        # trip into Tcl, and this walks the whole pool on every keystroke.
-        for slot in self._row_pool[len(visible):]:
-            if slot["mapped"]:
-                slot["outer"].pack_forget()
-                slot["mapped"] = False
-
-    def _fill_tiles(self, visible):
-        columns = self._grid_column_count() if visible else self._grid_columns
-        if columns != self._grid_columns:
-            for column in range(max(columns, self._grid_columns)):
-                self.tiles_box.grid_columnconfigure(
-                    column, weight=1 if column < columns else 0,
-                    uniform="sound" if column < columns else "",
-                )
-            self._grid_columns = columns
-        while len(self._tile_pool) < len(visible):
-            self._tile_pool.append(self._make_tile())
-        for position, (slot, (idx, sound)) in enumerate(zip(self._tile_pool, visible)):
-            self._bind_tile(slot, idx, sound)
-            slot["cell"].grid(
-                row=position // columns, column=position % columns,
-                sticky="ew", padx=4, pady=4,
-            )
-            slot["mapped"] = True
-        for slot in self._tile_pool[len(visible):]:
-            if slot["mapped"]:
-                slot["cell"].grid_remove()
-                slot["mapped"] = False
 
     def _make_tile(self):
         """One reusable tile. The callbacks read the slot's binding when
@@ -411,7 +433,7 @@ class SoundListMixin:
         slot = {"idx": None, "sound": None, "mapped": False}
         # A cell, not a bare button, so the tile can carry a progress
         # bar under it the way list rows do.
-        cell = ctk.CTkFrame(self.tiles_box, fg_color="transparent")
+        cell = ctk.CTkFrame(self.list_frame.canvas, fg_color="transparent")
         button = ctk.CTkButton(
             cell, text="", height=84,
             command=lambda: self.play_sound(slot["sound"]),
@@ -426,7 +448,8 @@ class SoundListMixin:
         )
         progress.set(0)
         progress.pack(fill="x", pady=(2, 0))
-        slot.update(cell=cell, button=button, progress=progress)
+        slot.update(cell=cell, button=button, progress=progress,
+                    item=self.list_frame.attach(cell))
         return slot
 
     def _bind_tile(self, slot, idx, sound):
@@ -463,7 +486,7 @@ class SoundListMixin:
         # The outer frame carries the drag target and the progress bar; the
         # inner one keeps the controls on a single line.
         outer = ctk.CTkFrame(
-            self.rows_box, fg_color=COLOR_SURFACE, corner_radius=RADIUS_CONTROL,
+            self.list_frame.canvas, fg_color=COLOR_SURFACE, corner_radius=RADIUS_CONTROL,
             border_width=CARD_BORDER, border_color=COLOR_BORDER,
         )
         outer.sound_index = None
@@ -547,6 +570,7 @@ class SoundListMixin:
             outer=outer, checkbox=checkbox, label=label, meta=meta_label,
             volume=volume_slider, volume_label=volume_label, stop=stop,
             hotkey=hotkey_button, progress=progress,
+            item=self.list_frame.attach(outer),
         )
         return slot
 

@@ -12,7 +12,8 @@ virtual audio cable.
   - Support modules: `audio_engine.py`, `dsp.py` (offline clip processing
     for the editor: filters, phase vocoder), `hotkeys.py` (listener and
     platform quirks), `dialogs.py`, `downloader.py` (yt-dlp), `config.py`,
-    `theme.py`, `tray.py`, `autostart.py`, `bug_report.py`
+    `theme.py`, `tray.py`, `autostart.py`, `bug_report.py`,
+    `virtual_list.py` (the board's scroller)
 - Config, `Sounds/` and `assets/` live at the repo root when running
   from source: `config.py` anchors them one level up from itself. A
   built app puts user data in the per-user folder instead
@@ -132,6 +133,23 @@ virtual audio cable.
   because past that a quiet clip is amplified hiss, cutting runs to 30
   because a cut only makes something quieter. config "reference_lufs" is
   the measured microphone; with none, clips land at LOUDNESS_TARGET_LUFS
+- The board's list: sound_list.py builds only the rows that fit on
+  screen. CTkScrollableFrame lays out every child it holds and Tk's cost
+  for that grows far faster than their number - 50 sounds took three
+  minutes to open, 200 never finished - and suppressing either of the
+  frame's <Configure> bindings or building while unmapped all measured
+  the same, so the only cure was to lay out fewer widgets. virtual_list.py
+  holds the rows as canvas window items (pack and place both feed the
+  geometry manager, coords() does not) and calls back with the slice that
+  belongs on screen; sound_list rebinds its pooled slots to that slice.
+  Because of that, a slot's callbacks read slot["idx"]/["sound"] when they
+  fire rather than capturing an index - scrolling retargets them. The row
+  pitch is measured from a real row after an idle pass, since a CTkFrame
+  asks for its default 200px until Tk has run geometry propagation. Only
+  the rows on screen are in _playing_widgets, and mac_scroll.bind_canvas()
+  gives the canvas the trackpad gesture CTkScrollableFrame gets patched
+  for; _scroll_pixels reads the scroll region rather than bbox("all"),
+  which on a virtualised list is only a screenful
 - Errors: Tk callback errors and startup failures show a dialog and append
   to soundboard_error.log; config writes are atomic
 - Sharing: board_file.py reads/writes .sbboard files (links, not audio);
