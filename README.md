@@ -43,6 +43,8 @@ together, from one virtual microphone.
 - **Match clip levels:** measures every clip against EBU R128 and plays
   the whole board at one perceived level, so a quiet clip and a loud one
   arrive the same. Measure your voice and clips land at its level
+- **Duck under clips:** dips your mic while a clip plays so your voice
+  isn't buried under it, from a few dB down to silencing it outright
 - **Download** tab: grab audio from YouTube, TikTok, Instagram and other
   sites (via yt-dlp) as MP3, straight into your board, with progress,
   cancel, and optional start/end times
@@ -213,6 +215,13 @@ button on the Soundboard tab, so the board itself keeps the window.
   triggered. Only clips are sent there, not your mic. If the virtual mic
   output is itself your default output (e.g. no virtual cable installed),
   you'll hear the main mix regardless of this setting.
+- **Duck under clips:** off until you switch it on, in the Mic row of the
+  settings. While any clip is playing your microphone drops by the amount
+  on the slider and comes back when the clip ends, ramped so your voice
+  doesn't click in and out. The slider runs from -3 dB to the far end,
+  **Mute**, which silences the mic under a clip entirely. Only what goes
+  down the cable is ducked - clips still reach your own headphones at
+  full level through "Hear soundboard".
 - **Match clip levels:** off until you switch it on. Every clip is
   measured when it joins the board - imported, recorded, downloaded,
   spoken or saved from the editor - and matching plays them all at one
