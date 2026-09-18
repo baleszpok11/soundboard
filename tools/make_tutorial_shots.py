@@ -2,6 +2,10 @@
 
     xvfb-run -a -s "-screen 0 1100x800x24" python tools/make_tutorial_shots.py
 
+Each platform's shots are taken with that platform's look forced, in a
+process of its own, because the app now draws itself differently on each
+one and a Linux-rendered window is not what a Mac user is following.
+
 Every shot is taken from a real Soundboard window with the state the
 tutorial describes, then cropped to the widgets being talked about - the
 crop follows widget geometry rather than fixed pixels, so moving a
@@ -14,6 +18,7 @@ temporary directory first.
 """
 
 import os
+import subprocess
 import sys
 import tempfile
 
@@ -31,6 +36,7 @@ os.makedirs(config.SOUNDS_DIR, exist_ok=True)
 
 import customtkinter as ctk  # noqa: E402
 from soundboard.app import Soundboard  # noqa: E402
+from soundboard.theme import set_appearance  # noqa: E402
 
 OUT_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                        "assets", "tutorial")
@@ -85,13 +91,34 @@ def set_devices(board, mic, cable):
     board.config["output_device"] = cable
 
 
+def run_platform(platform_name):
+    """Re-run this script with one platform's look forced, so a shot of the
+    macOS setup actually shows the macOS chrome. SOUNDBOARD_PLATFORM is read
+    once at import, so each platform needs its own process."""
+    env = dict(os.environ, SOUNDBOARD_PLATFORM=platform_name)
+    result = subprocess.run([sys.executable, os.path.abspath(__file__), platform_name], env=env)
+    if result.returncode != 0:
+        raise SystemExit(f"{platform_name} shots failed")
+
+
 def main():
     os.makedirs(OUT_DIR, exist_ok=True)
-    ctk.set_appearance_mode("dark")
-    ctk.set_default_color_theme("dark-blue")
+    if len(sys.argv) < 2:
+        # No platform named: do all three, each in its own process.
+        for platform_name in DEVICES:
+            run_platform(platform_name)
+        return
+    platform_name = sys.argv[1]
+    if platform_name not in DEVICES:
+        raise SystemExit(f"unknown platform {platform_name!r}; expected one of {', '.join(DEVICES)}")
     root = ctk.CTk()
     root.geometry(WINDOW)
     board = Soundboard(root)
+    # After the window is built, not before: Soundboard applies the theme
+    # itself from the config, and a config with no appearance saved means
+    # "system", which would make these shots depend on whatever desktop
+    # they were generated on. The help is written against the dark look.
+    set_appearance("dark")
     # The meters are polled on a timer that would wipe the level set below.
     if board._meter_poll is not None:
         root.after_cancel(board._meter_poll)
@@ -107,15 +134,19 @@ def main():
 
     device_rows = (mic_label, output_label, board.input_menu,
                    board.output_menu, board.output_meter)
-    for platform_name, (mic, cable) in DEVICES.items():
-        set_devices(board, mic, cable)
-        board._update_meter(board.input_meter, 0.0, True, True)
-        board._update_meter(board.output_meter, 0.0, True, True)
-        shoot(root, f"devices-{platform_name}", *device_rows)
+    set_devices(board, *DEVICES[platform_name])
+    board._update_meter(board.input_meter, 0.0, True, True)
+    board._update_meter(board.output_meter, 0.0, True, True)
+    shoot(root, f"devices-{platform_name}", *device_rows)
 
-    # The Test checkpoint: the output meter mid-tone, in the app's own
-    # colours rather than ones picked here.
-    set_devices(board, *DEVICES["windows"])
+    # The Test checkpoint and the feedback warning are shown once each, not
+    # per platform: they are written in Windows device names and the
+    # tutorial shows the same file to everyone.
+    if platform_name != "windows":
+        root.destroy()
+        return
+    # The output meter mid-tone, in the app's own colours rather than ones
+    # picked here.
     board._update_meter(board.output_meter, 0.62, True, True)
     shoot(root, "test", output_label, board.output_menu, board.output_meter, output_side)
 

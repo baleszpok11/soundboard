@@ -16,14 +16,19 @@ from . import updater
 from .config import write_error_log
 from .hotkeys import MODIFIER_ORDER, hotkey_part_for_key, modifier_for_keysym
 from .theme import (
-    COLOR_BG,
+    COLOR_ACCENT_TEXT,
+    COLOR_BORDER,
     COLOR_ERROR,
+    COLOR_ON_ACCENT,
     COLOR_ORANGE,
     COLOR_ORANGE_HOVER,
     COLOR_ROW,
+    COLOR_ROW_HOVER,
     COLOR_SURFACE,
     COLOR_TEXT,
     COLOR_TEXT_DIM,
+    font,
+    register_tk,
 )
 
 
@@ -39,7 +44,7 @@ class TextDialog(ctk.CTkToplevel):
         self.result = None
         ctk.CTkLabel(self, text=prompt, text_color=COLOR_TEXT).pack(anchor="w", padx=16, pady=(16, 6))
         self.entry = ctk.CTkEntry(
-            self, width=360, fg_color=COLOR_ROW, text_color=COLOR_TEXT, border_color=COLOR_ORANGE,
+            self, width=360, fg_color=COLOR_ROW, text_color=COLOR_TEXT, border_color=COLOR_BORDER,
         )
         self.entry.pack(fill="x", padx=16)
         self.entry.insert(0, initial)
@@ -48,12 +53,12 @@ class TextDialog(ctk.CTkToplevel):
         buttons.pack(fill="x", padx=16, pady=16)
         ctk.CTkButton(
             buttons, text="Cancel", width=90, command=self.destroy,
-            fg_color=COLOR_ROW, hover_color=COLOR_BG, text_color=COLOR_ORANGE,
-            border_width=1, border_color=COLOR_ORANGE,
+            fg_color=COLOR_ROW, hover_color=COLOR_ROW_HOVER, text_color=COLOR_TEXT,
+            border_width=1, border_color=COLOR_BORDER,
         ).pack(side="right")
         ctk.CTkButton(
             buttons, text="OK", width=90, command=self._ok,
-            fg_color=COLOR_ORANGE, hover_color=COLOR_ORANGE_HOVER, text_color=COLOR_BG,
+            fg_color=COLOR_ORANGE, hover_color=COLOR_ORANGE_HOVER, text_color=COLOR_ON_ACCENT,
         ).pack(side="right", padx=(0, 6))
         self.entry.bind("<Return>", lambda e: self._ok())
         self.bind("<Escape>", lambda e: self.destroy())
@@ -92,7 +97,7 @@ class HotkeyDialog(ctk.CTkToplevel):
         self.prompt = ctk.CTkLabel(self, text="", text_color=COLOR_TEXT, justify="left")
         self.prompt.pack(anchor="w", padx=16, pady=(16, 6))
         self.entry = ctk.CTkEntry(
-            self, width=320, fg_color=COLOR_ROW, text_color=COLOR_TEXT, border_color=COLOR_ORANGE,
+            self, width=320, fg_color=COLOR_ROW, text_color=COLOR_TEXT, border_color=COLOR_BORDER,
         )
         self.entry.pack(fill="x", padx=16)
         if current:
@@ -103,8 +108,8 @@ class HotkeyDialog(ctk.CTkToplevel):
         buttons = ctk.CTkFrame(self, fg_color=COLOR_SURFACE)
         buttons.pack(fill="x", padx=16, pady=(8, 16))
         secondary = dict(
-            fg_color=COLOR_ROW, hover_color=COLOR_BG, text_color=COLOR_ORANGE,
-            border_width=1, border_color=COLOR_ORANGE, width=90,
+            fg_color=COLOR_ROW, hover_color=COLOR_ROW_HOVER, text_color=COLOR_TEXT,
+            border_width=1, border_color=COLOR_BORDER, width=90,
         )
         self.record_button = ctk.CTkButton(buttons, text="Record again", command=self._start_recording, **secondary)
         self.record_button.pack(side="left")
@@ -112,7 +117,7 @@ class HotkeyDialog(ctk.CTkToplevel):
         ctk.CTkButton(buttons, text="Cancel", command=self.destroy, **secondary).pack(side="right")
         ctk.CTkButton(
             buttons, text="Save", width=90, command=self._save,
-            fg_color=COLOR_ORANGE, hover_color=COLOR_ORANGE_HOVER, text_color=COLOR_BG,
+            fg_color=COLOR_ORANGE, hover_color=COLOR_ORANGE_HOVER, text_color=COLOR_ON_ACCENT,
         ).pack(side="right", padx=(0, 6))
 
         self.bind("<KeyPress>", self._on_key_press)
@@ -221,12 +226,12 @@ class ErrorDialog(ctk.CTkToplevel):
         buttons.pack(fill="x", padx=16, pady=(0, 16))
         ctk.CTkButton(
             buttons, text="Close", width=90, command=self.destroy,
-            fg_color=COLOR_ROW, hover_color=COLOR_BG, text_color=COLOR_ORANGE,
-            border_width=1, border_color=COLOR_ORANGE,
+            fg_color=COLOR_ROW, hover_color=COLOR_ROW_HOVER, text_color=COLOR_TEXT,
+            border_width=1, border_color=COLOR_BORDER,
         ).pack(side="right")
         ctk.CTkButton(
             buttons, text="Report bug", width=110, command=self._report,
-            fg_color=COLOR_ORANGE, hover_color=COLOR_ORANGE_HOVER, text_color=COLOR_BG,
+            fg_color=COLOR_ORANGE, hover_color=COLOR_ORANGE_HOVER, text_color=COLOR_ON_ACCENT,
         ).pack(side="right", padx=(0, 6))
         self.transient(parent)
         self.after(50, self._focus)
@@ -280,7 +285,7 @@ class ReportDialog(ctk.CTkToplevel):
         ).pack(anchor="w", padx=16, pady=(16, 4))
         self.description = ctk.CTkTextbox(
             self, height=90, fg_color=COLOR_ROW, text_color=COLOR_TEXT,
-            border_color=COLOR_ORANGE, border_width=1,
+            border_color=COLOR_BORDER, border_width=1,
         )
         self.description.pack(fill="x", padx=16)
         self.description.bind("<KeyRelease>", lambda e: self._refresh_preview())
@@ -289,7 +294,7 @@ class ReportDialog(ctk.CTkToplevel):
             self, text="Contact (optional, only if you want a reply):", text_color=COLOR_TEXT,
         ).pack(anchor="w", padx=16, pady=(10, 4))
         self.contact = ctk.CTkEntry(
-            self, fg_color=COLOR_ROW, text_color=COLOR_TEXT, border_color=COLOR_ORANGE,
+            self, fg_color=COLOR_ROW, text_color=COLOR_TEXT, border_color=COLOR_BORDER,
         )
         self.contact.pack(fill="x", padx=16)
         self.contact.bind("<KeyRelease>", lambda e: self._refresh_preview())
@@ -315,13 +320,13 @@ class ReportDialog(ctk.CTkToplevel):
         buttons = ctk.CTkFrame(self, fg_color=COLOR_SURFACE)
         buttons.pack(fill="x", padx=16, pady=(6, 16))
         secondary = dict(
-            fg_color=COLOR_ROW, hover_color=COLOR_BG, text_color=COLOR_ORANGE,
-            border_width=1, border_color=COLOR_ORANGE,
+            fg_color=COLOR_ROW, hover_color=COLOR_ROW_HOVER, text_color=COLOR_TEXT,
+            border_width=1, border_color=COLOR_BORDER,
         )
         ctk.CTkButton(buttons, text="Cancel", width=90, command=self.destroy, **secondary).pack(side="right")
         self.send_button = ctk.CTkButton(
             buttons, text="Send", width=110, command=self._send,
-            fg_color=COLOR_ORANGE, hover_color=COLOR_ORANGE_HOVER, text_color=COLOR_BG,
+            fg_color=COLOR_ORANGE, hover_color=COLOR_ORANGE_HOVER, text_color=COLOR_ON_ACCENT,
         )
         self.send_button.pack(side="right", padx=(0, 6))
         ctk.CTkButton(buttons, text="Copy report", width=110, command=self._copy, **secondary).pack(side="left")
@@ -351,7 +356,7 @@ class ReportDialog(ctk.CTkToplevel):
     def _copy(self):
         self.clipboard_clear()
         self.clipboard_append(self._body())
-        self.status.configure(text="Report copied to your clipboard.", text_color=COLOR_ORANGE)
+        self.status.configure(text="Report copied to your clipboard.", text_color=COLOR_ACCENT_TEXT)
 
     def _send(self):
         if not self.description.get("1.0", "end").strip():
@@ -380,7 +385,7 @@ class ReportDialog(ctk.CTkToplevel):
 
     def _sent(self, url):
         self._sending = False
-        self.status.configure(text=f"Thank you. Your report is at {url}", text_color=COLOR_ORANGE)
+        self.status.configure(text=f"Thank you. Your report is at {url}", text_color=COLOR_ACCENT_TEXT)
         self.send_button.configure(state="disabled", text="Sent")
         if url:
             webbrowser.open(url)
@@ -404,7 +409,7 @@ class ReportDialog(ctk.CTkToplevel):
                 "Opened GitHub's new issue page in your browser, with the report filled in. "
                 "It is on your clipboard as well, in case anything is missing."
             ),
-            text_color=COLOR_ORANGE,
+            text_color=COLOR_ACCENT_TEXT,
         )
 
 
@@ -428,7 +433,7 @@ class UpdateDialog(ctk.CTkToplevel):
 
         ctk.CTkLabel(
             self, text=f"Soundboard {release.version} is available.",
-            text_color=COLOR_ORANGE, anchor="w",
+            text_color=COLOR_ACCENT_TEXT, anchor="w",
             font=ctk.CTkFont(size=15, weight="bold"),
         ).pack(anchor="w", padx=16, pady=(16, 2))
         ctk.CTkLabel(
@@ -439,9 +444,10 @@ class UpdateDialog(ctk.CTkToplevel):
         if release.notes:
             notes = tk.Text(
                 self, height=self.NOTES_LINES, width=64, wrap="word",
-                bg=COLOR_ROW, fg=COLOR_TEXT, relief="flat", padx=10, pady=8,
-                highlightthickness=0,
+                relief="flat", padx=10, pady=8, highlightthickness=0,
+                font=font("body"),
             )
+            register_tk(notes, bg=COLOR_ROW, fg=COLOR_TEXT)
             notes.insert("1.0", release.notes)
             notes.configure(state="disabled")
             notes.pack(fill="both", expand=True, padx=16, pady=(0, 8))
@@ -458,26 +464,26 @@ class UpdateDialog(ctk.CTkToplevel):
         buttons.pack(fill="x", padx=16, pady=(0, 16))
         self.close_button = ctk.CTkButton(
             buttons, text="Later", width=90, command=self._close,
-            fg_color=COLOR_ROW, hover_color=COLOR_BG, text_color=COLOR_ORANGE,
-            border_width=1, border_color=COLOR_ORANGE,
+            fg_color=COLOR_ROW, hover_color=COLOR_ROW_HOVER, text_color=COLOR_TEXT,
+            border_width=1, border_color=COLOR_BORDER,
         )
         self.close_button.pack(side="right")
         self.skip_button = ctk.CTkButton(
             buttons, text="Skip this version", width=140, command=self._skip,
-            fg_color=COLOR_ROW, hover_color=COLOR_BG, text_color=COLOR_ORANGE,
-            border_width=1, border_color=COLOR_ORANGE,
+            fg_color=COLOR_ROW, hover_color=COLOR_ROW_HOVER, text_color=COLOR_TEXT,
+            border_width=1, border_color=COLOR_BORDER,
         )
         self.skip_button.pack(side="right", padx=(0, 6))
         self.action_button = ctk.CTkButton(
             buttons, text=self._action_text(), width=150, command=self._start,
-            fg_color=COLOR_ORANGE, hover_color=COLOR_ORANGE_HOVER, text_color=COLOR_BG,
+            fg_color=COLOR_ORANGE, hover_color=COLOR_ORANGE_HOVER, text_color=COLOR_ON_ACCENT,
         )
         self.action_button.pack(side="right", padx=(0, 6))
         ctk.CTkButton(
             buttons, text="Release page", width=110,
             command=lambda: webbrowser.open(updater.RELEASES_PAGE),
-            fg_color=COLOR_ROW, hover_color=COLOR_BG, text_color=COLOR_ORANGE,
-            border_width=1, border_color=COLOR_ORANGE,
+            fg_color=COLOR_ROW, hover_color=COLOR_ROW_HOVER, text_color=COLOR_TEXT,
+            border_width=1, border_color=COLOR_BORDER,
         ).pack(side="left")
 
         self.protocol("WM_DELETE_WINDOW", self._close)

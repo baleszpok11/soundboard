@@ -32,13 +32,22 @@ from .config import (
 )
 from .theme import (
     COLOR_BG,
+    COLOR_BORDER,
     COLOR_ERROR,
+    COLOR_ERROR_HOVER,
+    COLOR_ON_ACCENT,
+    COLOR_ON_ERROR,
     COLOR_ORANGE,
     COLOR_ORANGE_HOVER,
     COLOR_ROW,
+    COLOR_ROW_HOVER,
     COLOR_SURFACE,
     COLOR_TEXT,
     COLOR_TEXT_DIM,
+    font,
+    on_appearance_change,
+    register_tk,
+    resolve,
 )
 
 MIN_CLIP_S = 0.05  # shortest clip the editor can trim to
@@ -131,19 +140,20 @@ class EditorMixin:
             values=[EDITOR_PLACEHOLDER],
             command=self._on_editor_sound_selected,
             fg_color=COLOR_ROW,
-            button_color=COLOR_ORANGE,
-            button_hover_color=COLOR_ORANGE_HOVER,
             text_color=COLOR_TEXT,
-            dropdown_fg_color=COLOR_ROW,
         )
         self.editor_sound_menu.grid(row=0, column=1, sticky="ew", padx=8, pady=8)
         ctk.CTkButton(
             top, text="Browse...", width=90, command=self._on_editor_browse,
-            fg_color=COLOR_ROW, hover_color=COLOR_SURFACE, text_color=COLOR_ORANGE,
-            border_width=1, border_color=COLOR_ORANGE,
+            fg_color=COLOR_ROW, hover_color=COLOR_ROW_HOVER, text_color=COLOR_TEXT,
+            border_width=1, border_color=COLOR_BORDER,
         ).grid(row=0, column=2, sticky="e", padx=8, pady=8)
 
-        self.editor_canvas = tk.Canvas(parent, height=140, bg=COLOR_ROW, highlightthickness=0)
+        self.editor_canvas = tk.Canvas(parent, height=140, highlightthickness=0)
+        # The waveform is redrawn from scratch on a mode change, so the
+        # canvas only needs its background tracked.
+        register_tk(self.editor_canvas, bg=COLOR_ROW)
+        on_appearance_change(self._draw_waveform)
         self.editor_canvas.pack(fill="x", padx=4, pady=4)
         self.editor_canvas.bind("<Configure>", lambda e: self._draw_waveform())
 
@@ -151,23 +161,23 @@ class EditorMixin:
         buttons.pack(side="bottom", fill="x", padx=4, pady=(4, 8))
         self.editor_preview_button = ctk.CTkButton(
             buttons, text="Preview", command=self._on_editor_preview,
-            hover_color=COLOR_ORANGE_HOVER, text_color=COLOR_BG, text_color_disabled=COLOR_TEXT_DIM,
+            hover_color=COLOR_ORANGE_HOVER, text_color=COLOR_ON_ACCENT, text_color_disabled=COLOR_TEXT_DIM,
         )
         self.editor_preview_button.pack(side="left", padx=(4, 4))
         self.editor_stop_button = ctk.CTkButton(
             buttons, text="Stop", command=lambda: self.audio_engine.stop_key(EDITOR_PREVIEW_KEY),
-            hover_color="#cc4444", text_color=COLOR_BG, text_color_disabled=COLOR_TEXT_DIM,
+            hover_color=COLOR_ERROR_HOVER, text_color=COLOR_ON_ERROR, text_color_disabled=COLOR_TEXT_DIM,
         )
         self.editor_stop_button.pack(side="left", padx=(4, 4))
         self.editor_undo_button = ctk.CTkButton(
             buttons, text="Undo", command=self._on_editor_undo,
-            fg_color=COLOR_ROW, hover_color=COLOR_SURFACE, text_color=COLOR_ORANGE,
+            fg_color=COLOR_ROW, hover_color=COLOR_ROW_HOVER, text_color=COLOR_TEXT,
             text_color_disabled=COLOR_TEXT_DIM, border_width=1,
         )
         self.editor_undo_button.pack(side="left", padx=(4, 4))
         self.editor_save_button = ctk.CTkButton(
             buttons, text="Save as new sound", command=self._on_editor_save,
-            fg_color=COLOR_ROW, hover_color=COLOR_SURFACE, text_color=COLOR_ORANGE,
+            fg_color=COLOR_ROW, hover_color=COLOR_ROW_HOVER, text_color=COLOR_TEXT,
             text_color_disabled=COLOR_TEXT_DIM, border_width=1,
         )
         self.editor_save_button.pack(side="left", padx=(4, 4))
@@ -182,8 +192,7 @@ class EditorMixin:
         ctk.CTkLabel(trim_frame, text="Start:", text_color=COLOR_TEXT).grid(row=0, column=0, sticky="w", padx=8, pady=6)
         self.editor_start_slider = ctk.CTkSlider(
             trim_frame, from_=0, to=1, command=lambda v: self._on_trim_change(moved="start"),
-            fg_color=COLOR_ROW, progress_color=COLOR_ORANGE,
-            button_color=COLOR_ORANGE, button_hover_color=COLOR_ORANGE_HOVER,
+            fg_color=COLOR_ROW, progress_color=COLOR_ORANGE, button_hover_color=COLOR_ORANGE_HOVER,
         )
         self.editor_start_slider.set(0)
         self.editor_start_slider.grid(row=0, column=1, sticky="ew", padx=8, pady=6)
@@ -193,8 +202,7 @@ class EditorMixin:
         ctk.CTkLabel(trim_frame, text="End:", text_color=COLOR_TEXT).grid(row=1, column=0, sticky="w", padx=8, pady=6)
         self.editor_end_slider = ctk.CTkSlider(
             trim_frame, from_=0, to=1, command=lambda v: self._on_trim_change(moved="end"),
-            fg_color=COLOR_ROW, progress_color=COLOR_ORANGE,
-            button_color=COLOR_ORANGE, button_hover_color=COLOR_ORANGE_HOVER,
+            fg_color=COLOR_ROW, progress_color=COLOR_ORANGE, button_hover_color=COLOR_ORANGE_HOVER,
         )
         self.editor_end_slider.set(1)
         self.editor_end_slider.grid(row=1, column=1, sticky="ew", padx=8, pady=6)
@@ -204,8 +212,7 @@ class EditorMixin:
         ctk.CTkLabel(trim_frame, text="Bass:", text_color=COLOR_TEXT).grid(row=2, column=0, sticky="w", padx=8, pady=6)
         self.editor_bass_slider = ctk.CTkSlider(
             trim_frame, from_=-BASS_RANGE_DB, to=BASS_RANGE_DB, command=self._on_bass_change,
-            fg_color=COLOR_ROW, progress_color=COLOR_ORANGE,
-            button_color=COLOR_ORANGE, button_hover_color=COLOR_ORANGE_HOVER,
+            fg_color=COLOR_ROW, progress_color=COLOR_ORANGE, button_hover_color=COLOR_ORANGE_HOVER,
         )
         self.editor_bass_slider.set(0)
         self.editor_bass_slider.grid(row=2, column=1, sticky="ew", padx=8, pady=6)
@@ -215,8 +222,7 @@ class EditorMixin:
         ctk.CTkLabel(trim_frame, text="Volume:", text_color=COLOR_TEXT).grid(row=3, column=0, sticky="w", padx=8, pady=6)
         self.editor_gain_slider = ctk.CTkSlider(
             trim_frame, from_=-GAIN_RANGE_DB, to=GAIN_RANGE_DB, command=self._on_gain_change,
-            fg_color=COLOR_ROW, progress_color=COLOR_ORANGE,
-            button_color=COLOR_ORANGE, button_hover_color=COLOR_ORANGE_HOVER,
+            fg_color=COLOR_ROW, progress_color=COLOR_ORANGE, button_hover_color=COLOR_ORANGE_HOVER,
         )
         self.editor_gain_slider.set(0)
         self.editor_gain_slider.grid(row=3, column=1, sticky="ew", padx=8, pady=6)
@@ -225,7 +231,7 @@ class EditorMixin:
         self.editor_normalize_checkbox = ctk.CTkCheckBox(
             trim_frame, text="Normalize", command=self._on_normalize_change,
             fg_color=COLOR_ORANGE, hover_color=COLOR_ORANGE_HOVER,
-            checkmark_color=COLOR_BG, text_color=COLOR_TEXT,
+            checkmark_color=COLOR_ON_ACCENT, text_color=COLOR_TEXT,
         )
         self.editor_normalize_checkbox.grid(row=3, column=3, sticky="w", padx=(0, 8), pady=6)
 
@@ -236,8 +242,7 @@ class EditorMixin:
             )
             slider = ctk.CTkSlider(
                 trim_frame, from_=0, to=MIN_FADE_MAX_S, command=lambda v: self._on_fade_change(),
-                fg_color=COLOR_ROW, progress_color=COLOR_ORANGE,
-                button_color=COLOR_ORANGE, button_hover_color=COLOR_ORANGE_HOVER,
+                fg_color=COLOR_ROW, progress_color=COLOR_ORANGE, button_hover_color=COLOR_ORANGE_HOVER,
             )
             slider.set(0)
             slider.grid(row=row, column=1, sticky="ew", padx=8, pady=6)
@@ -253,8 +258,7 @@ class EditorMixin:
         self.editor_pitch_slider = ctk.CTkSlider(
             trim_frame, from_=-PITCH_RANGE_ST, to=PITCH_RANGE_ST,
             number_of_steps=PITCH_RANGE_ST * 4, command=self._on_pitch_change,
-            fg_color=COLOR_ROW, progress_color=COLOR_ORANGE,
-            button_color=COLOR_ORANGE, button_hover_color=COLOR_ORANGE_HOVER,
+            fg_color=COLOR_ROW, progress_color=COLOR_ORANGE, button_hover_color=COLOR_ORANGE_HOVER,
         )
         self.editor_pitch_slider.set(0)
         self.editor_pitch_slider.grid(row=6, column=1, sticky="ew", padx=8, pady=6)
@@ -269,8 +273,7 @@ class EditorMixin:
         self.editor_speed_slider = ctk.CTkSlider(
             trim_frame, from_=-SPEED_RANGE_OCTAVES, to=SPEED_RANGE_OCTAVES,
             command=self._on_speed_change,
-            fg_color=COLOR_ROW, progress_color=COLOR_ORANGE,
-            button_color=COLOR_ORANGE, button_hover_color=COLOR_ORANGE_HOVER,
+            fg_color=COLOR_ROW, progress_color=COLOR_ORANGE, button_hover_color=COLOR_ORANGE_HOVER,
         )
         self.editor_speed_slider.set(0)
         self.editor_speed_slider.grid(row=7, column=1, sticky="ew", padx=8, pady=6)
@@ -281,7 +284,7 @@ class EditorMixin:
         self.editor_link_checkbox = ctk.CTkCheckBox(
             trim_frame, text="Tape", command=self._on_link_change,
             fg_color=COLOR_ORANGE, hover_color=COLOR_ORANGE_HOVER,
-            checkmark_color=COLOR_BG, text_color=COLOR_TEXT,
+            checkmark_color=COLOR_ON_ACCENT, text_color=COLOR_TEXT,
         )
         self.editor_link_checkbox.grid(row=7, column=3, sticky="w", padx=(0, 8), pady=6)
 
@@ -290,9 +293,7 @@ class EditorMixin:
         )
         self.editor_clip_mode = ctk.CTkSegmentedButton(
             trim_frame, values=list(CLIP_MODES),
-            command=lambda _v: self._record_editor_change(),
-            selected_color=COLOR_ORANGE, selected_hover_color=COLOR_ORANGE_HOVER,
-            unselected_color=COLOR_ROW, unselected_hover_color=COLOR_SURFACE, text_color=COLOR_TEXT,
+            command=lambda _v: self._record_editor_change(), selected_hover_color=COLOR_ORANGE_HOVER, unselected_hover_color=COLOR_SURFACE, text_color=COLOR_TEXT,
         )
         self.editor_clip_mode.set(CLIP_CLEAN)
         self.editor_clip_mode.grid(row=8, column=1, columnspan=2, sticky="w", padx=8, pady=6)
@@ -317,8 +318,7 @@ class EditorMixin:
             slider = ctk.CTkSlider(
                 effects, from_=low, to=high,
                 command=lambda value, k=key: self._on_effect_change(k, value),
-                fg_color=COLOR_ROW, progress_color=COLOR_ORANGE,
-                button_color=COLOR_ORANGE, button_hover_color=COLOR_ORANGE_HOVER,
+                fg_color=COLOR_ROW, progress_color=COLOR_ORANGE, button_hover_color=COLOR_ORANGE_HOVER,
             )
             slider.set(default)
             slider.grid(row=row, column=column + 1, sticky="ew", padx=4, pady=6)
@@ -336,7 +336,7 @@ class EditorMixin:
             box = ctk.CTkCheckBox(
                 effects, text=text, command=self._record_editor_change,
                 fg_color=COLOR_ORANGE, hover_color=COLOR_ORANGE_HOVER,
-                checkmark_color=COLOR_BG, text_color=COLOR_TEXT,
+                checkmark_color=COLOR_ON_ACCENT, text_color=COLOR_TEXT,
             )
             box.grid(row=row, column=column + index, sticky="w", padx=8, pady=6)
             self.editor_effect_toggles[key] = box
@@ -438,7 +438,7 @@ class EditorMixin:
         self._set_gain_enabled(not self.editor_normalize_checkbox.get())
         self.editor_preview_button.configure(state=state, fg_color=COLOR_ORANGE if enabled else COLOR_ROW)
         self.editor_stop_button.configure(state=state, fg_color=COLOR_ERROR if enabled else COLOR_ROW)
-        self.editor_save_button.configure(state=state, border_color=COLOR_ORANGE if enabled else COLOR_TEXT_DIM)
+        self.editor_save_button.configure(state=state, border_color=COLOR_BORDER if enabled else COLOR_TEXT_DIM)
         self._update_undo_button()
 
     def _set_gain_enabled(self, enabled):
@@ -453,7 +453,7 @@ class EditorMixin:
         can_undo = bool(self._editor_undo) and self.editor_data is not None
         self.editor_undo_button.configure(
             state="normal" if can_undo else "disabled",
-            border_color=COLOR_ORANGE if can_undo else COLOR_TEXT_DIM,
+            border_color=COLOR_BORDER if can_undo else COLOR_TEXT_DIM,
         )
 
     def _on_trim_change(self, moved):
@@ -645,11 +645,11 @@ class EditorMixin:
             width, height = 480, 140
         if self.editor_data is None:
             canvas.create_text(
-                width / 2, height / 2, fill=COLOR_TEXT_DIM,
+                width / 2, height / 2, fill=resolve(COLOR_TEXT_DIM), font=font("body"),
                 text="Choose a sound above, or click Browse... to open any audio file.",
             )
             return
-        canvas.create_rectangle(0, 0, 0, height, fill=COLOR_SURFACE, outline="", tags="selection")
+        canvas.create_rectangle(0, 0, 0, height, fill=resolve(COLOR_ROW_HOVER), outline="", tags="selection")
 
         mono = self._editor_mono
         columns = min(width, len(mono))
@@ -663,14 +663,14 @@ class EditorMixin:
         bottom = np.column_stack((xs[::-1], mid - np.clip(lows[::-1], -1, 1) * mid))
         points = np.concatenate((top, bottom)).ravel().tolist()
         if columns == 1:
-            canvas.create_line(0, points[1], 0, points[3], fill=COLOR_ORANGE)
+            canvas.create_line(0, points[1], 0, points[3], fill=resolve(COLOR_ORANGE))
         else:
-            canvas.create_polygon(points, fill=COLOR_ORANGE, outline=COLOR_ORANGE)
+            canvas.create_polygon(points, fill=resolve(COLOR_ORANGE), outline=resolve(COLOR_ORANGE))
 
-        canvas.create_line(0, 0, 0, height, fill=COLOR_TEXT, tags="start_marker")
-        canvas.create_line(0, 0, 0, height, fill=COLOR_TEXT, tags="end_marker")
+        canvas.create_line(0, 0, 0, height, fill=resolve(COLOR_TEXT), tags="start_marker")
+        canvas.create_line(0, 0, 0, height, fill=resolve(COLOR_TEXT), tags="end_marker")
         # Off-canvas until a preview moves it.
-        canvas.create_line(-1, 0, -1, height, fill=COLOR_ERROR, width=2, tags="playhead")
+        canvas.create_line(-1, 0, -1, height, fill=resolve(COLOR_ERROR), width=2, tags="playhead")
         self._update_selection()
 
     def _update_selection(self):

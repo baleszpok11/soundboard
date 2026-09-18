@@ -67,8 +67,9 @@ def main():
                 "Fedora: sudo dnf install portaudio\n"
                 "Arch: sudo pacman -S portaudio"
             )
-        ctk.set_appearance_mode("dark")
-        ctk.set_default_color_theme("dark-blue")
+        # The look is set in Soundboard.__init__, once the config has been
+        # read: the appearance mode is a setting, and the platform tokens
+        # need a window before they can ask Tk which fonts exist.
         root = ctk.CTk()
         # Soundboard swaps this for one that knows the config once it is up.
         root.report_callback_exception = lambda *exc: handle_exception(root, *exc)

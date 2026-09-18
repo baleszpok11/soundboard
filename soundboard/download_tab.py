@@ -20,11 +20,14 @@ from .downloader import (
     update_hint,
 )
 from .theme import (
-    COLOR_BG,
+    COLOR_ACCENT_TEXT,
+    COLOR_BORDER,
     COLOR_ERROR,
+    COLOR_ON_ACCENT,
     COLOR_ORANGE,
     COLOR_ORANGE_HOVER,
     COLOR_ROW,
+    COLOR_ROW_HOVER,
     COLOR_SURFACE,
     COLOR_TEXT,
     COLOR_TEXT_DIM,
@@ -47,7 +50,7 @@ class DownloadMixin:
             placeholder_text="https://...",
             fg_color=COLOR_ROW,
             text_color=COLOR_TEXT,
-            border_color=COLOR_ORANGE,
+            border_color=COLOR_BORDER,
         )
         self.download_url_entry.pack(fill="x", padx=8, pady=(0, 8))
 
@@ -58,7 +61,7 @@ class DownloadMixin:
             ctk.CTkLabel(times, text=label, text_color=COLOR_TEXT).pack(side="left", padx=(0, 4))
             entry = ctk.CTkEntry(
                 times, width=80, placeholder_text=placeholder,
-                fg_color=COLOR_ROW, text_color=COLOR_TEXT, border_color=COLOR_ORANGE,
+                fg_color=COLOR_ROW, text_color=COLOR_TEXT, border_color=COLOR_BORDER,
             )
             entry.pack(side="left", padx=(0, 12))
             entries.append(entry)
@@ -71,13 +74,13 @@ class DownloadMixin:
         buttons.pack(anchor="w", padx=8, pady=(0, 8))
         self.download_button = ctk.CTkButton(
             buttons, text="Download as MP3", command=self._start_download,
-            fg_color=COLOR_ORANGE, hover_color=COLOR_ORANGE_HOVER, text_color=COLOR_BG,
+            fg_color=COLOR_ORANGE, hover_color=COLOR_ORANGE_HOVER, text_color=COLOR_ON_ACCENT,
         )
         self.download_button.pack(side="left")
         self.download_cancel_button = ctk.CTkButton(
             buttons, text="Cancel", command=self._cancel_download,
-            fg_color=COLOR_ROW, hover_color=COLOR_SURFACE, text_color=COLOR_ORANGE,
-            border_width=1, border_color=COLOR_ORANGE,
+            fg_color=COLOR_ROW, hover_color=COLOR_ROW_HOVER, text_color=COLOR_TEXT,
+            border_width=1, border_color=COLOR_BORDER,
         )
 
         self.download_progress = ctk.CTkProgressBar(
@@ -90,8 +93,8 @@ class DownloadMixin:
         self._download_cancel = None
         self.download_update_button = ctk.CTkButton(
             frame, text="Open releases page", command=lambda: webbrowser.open(RELEASES_URL),
-            fg_color=COLOR_ROW, hover_color=COLOR_SURFACE, text_color=COLOR_ORANGE,
-            border_width=1, border_color=COLOR_ORANGE,
+            fg_color=COLOR_ROW, hover_color=COLOR_ROW_HOVER, text_color=COLOR_TEXT,
+            border_width=1, border_color=COLOR_BORDER,
         )
 
         version_text = f"Downloader: yt-dlp {yt_dlp.version.__version__}"
@@ -221,10 +224,10 @@ class DownloadMixin:
         existing = self._find_sound(path)
         if existing is not None:
             self.download_status.configure(
-                text=f"Already on your board as '{existing['name']}'.", text_color=COLOR_ORANGE
+                text=f"Already on your board as '{existing['name']}'.", text_color=COLOR_ACCENT_TEXT
             )
             return
-        self.download_status.configure(text=f"Saved: {os.path.basename(path)}", text_color=COLOR_ORANGE)
+        self.download_status.configure(text=f"Saved: {os.path.basename(path)}", text_color=COLOR_ACCENT_TEXT)
         # Keep where it came from and how it was trimmed, so the same clip
         # can be rebuilt from a shared board file.
         self._add_sound_entry(title, os.path.basename(path), source)
