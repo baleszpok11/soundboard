@@ -12,6 +12,7 @@ from tkinter import filedialog, messagebox
 import customtkinter as ctk
 
 from .config import (
+    NEW_SOUND_VOLUME,
     SOUNDS_DIR,
     unique_profile_name,
     ensure_sounds_dir,
@@ -21,7 +22,7 @@ from .config import (
     save_config,
     unique_path,
 )
-from .dialogs import TextDialog
+from .dialogs import TextDialog, VolumeDialog
 from .theme import (
     CARD_BORDER,
     COLOR_BG,
@@ -309,7 +310,7 @@ class SoundListMixin:
                 text_color=COLOR_ON_ACCENT if enabled and not missing else (COLOR_ERROR if missing else COLOR_TEXT_DIM),
             )
             button.pack(fill="x")
-            menu = lambda e, i=idx: self._show_sound_menu(e, i, with_hotkey=True)
+            menu = lambda e, i=idx: self._show_sound_menu(e, i, from_tile=True)
             button.bind("<Button-3>", menu)
             button.bind("<Button-2>" if sys.platform == "darwin" else "<Control-Button-1>", menu)
             progress = ctk.CTkProgressBar(
@@ -434,7 +435,7 @@ class SoundListMixin:
             "stop": stop, "before": hotkey_button,
         }
 
-    def _show_sound_menu(self, event, index, anchor=None, with_hotkey=False):
+    def _show_sound_menu(self, event, index, anchor=None, from_tile=False):
         menu = tk.Menu(
             self.root, tearoff=0, bg=resolve(COLOR_SURFACE), fg=resolve(COLOR_TEXT),
             activebackground=resolve(COLOR_ORANGE), activeforeground=resolve(COLOR_ON_ACCENT),
@@ -442,8 +443,11 @@ class SoundListMixin:
         )
         count = len(self.sounds)
         sound = self.sounds[index]
-        if with_hotkey:
+        # A tile is one button: the controls a list row shows inline have
+        # nowhere to live but this menu.
+        if from_tile:
             menu.add_command(label="Set hotkey...", command=lambda: self.set_hotkey(index))
+            menu.add_command(label="Volume...", command=lambda: self.set_volume(index))
         menu.add_command(
             label="Stop", command=lambda: self.stop_sound(sound),
             state="normal" if self._sound_key(sound) in self.audio_engine.active_keys() else "disabled",
@@ -536,6 +540,16 @@ class SoundListMixin:
         save_config(self.config)
         self._apply_hotkeys()
 
+    def set_volume(self, index):
+        """The grid's way into the volume the list rows show on a slider."""
+        sound = self.sounds[index]
+
+        def apply(percent):
+            sound["volume"] = percent
+            self._save_config_soon()
+
+        VolumeDialog(self.root, sound["name"], sound.get("volume", 100), apply)
+
     def _on_sound_volume(self, sound, label, value):
         sound["volume"] = int(round(value))
         label.configure(text=f"{sound['volume']}%")
@@ -613,7 +627,7 @@ class SoundListMixin:
         be shared as links rather than audio. Files picked from disk and
         clips saved by the editor have none, and aren't shareable."""
         entry = {"name": name, "path": stored_path, "hotkey": None, "enabled": True,
-                 "volume": 100, "loop": False}
+                 "volume": NEW_SOUND_VOLUME, "loop": False}
         if source is not None:
             entry["source"] = source
         self.sounds.append(entry)

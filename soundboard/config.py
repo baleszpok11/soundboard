@@ -56,6 +56,12 @@ def _legacy_data_dir():
 
 
 APP_VERSION = "0.9.1"  # bump before tagging a release; CI checks the tag matches
+# What a freshly added sound is set to. Clips are usually mastered far
+# louder than a voice, so full volume is how people blow out a call the
+# first time they press a button; quiet is the recoverable mistake.
+# Only new sounds - a board already on disk keeps whatever it has, and a
+# sound that predates the volume key still loads at 100 (see _load_sound).
+NEW_SOUND_VOLUME = 20
 DEFAULT_PROFILE = "Default"
 APP_DIR = _data_dir()
 CONFIG_PATH = os.path.join(APP_DIR, "soundboard_config.json")

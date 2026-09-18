@@ -27,6 +27,7 @@ from .theme import (
     COLOR_SURFACE,
     COLOR_TEXT,
     COLOR_TEXT_DIM,
+    VOLUME_MAX,
     font,
     register_tk,
 )
@@ -79,6 +80,67 @@ class TextDialog(ctk.CTkToplevel):
     def get(self):
         self.wait_window()
         return self.result
+
+
+class VolumeDialog(ctk.CTkToplevel):
+    """One sound's volume, on a slider.
+
+    The list rows carry this slider inline, but a tile is a single button
+    and its menu is a tk.Menu, which holds text entries and nothing else -
+    so for the grid the slider needs a window of its own. It applies as it
+    moves, exactly like the inline one, which is why there is nothing here
+    to confirm and no Cancel to promise an undo this never had.
+    """
+
+    def __init__(self, parent, name, volume, on_change):
+        super().__init__(parent)
+        self.title("Volume")
+        self.configure(fg_color=COLOR_SURFACE)
+        self.resizable(False, False)
+        self._on_change = on_change
+
+        ctk.CTkLabel(
+            self, text=name, text_color=COLOR_TEXT, anchor="w",
+            font=font("body_bold"),
+        ).pack(anchor="w", padx=16, pady=(16, 0))
+
+        row = ctk.CTkFrame(self, fg_color="transparent")
+        row.pack(fill="x", padx=16, pady=(8, 4))
+        self.value_label = ctk.CTkLabel(
+            row, text=f"{volume}%", text_color=COLOR_TEXT_DIM,
+            font=font("small"), width=46,
+        )
+        self.slider = ctk.CTkSlider(
+            row, from_=0, to=VOLUME_MAX, number_of_steps=VOLUME_MAX, width=240,
+            command=self._changed,
+        )
+        self.slider.set(volume)
+        self.slider.pack(side="left")
+        self.value_label.pack(side="left", padx=(8, 0))
+
+        ctk.CTkButton(
+            self, text="Done", width=90, command=self.destroy,
+            fg_color=COLOR_ORANGE, hover_color=COLOR_ORANGE_HOVER,
+            text_color=COLOR_ON_ACCENT,
+        ).pack(anchor="e", padx=16, pady=(4, 16))
+
+        self.bind("<Escape>", lambda e: self.destroy())
+        self.transient(parent)
+        self.after(50, self._focus)
+
+    def _focus(self):
+        self.slider.focus_force()
+        try:
+            self.grab_set()
+        except tk.TclError:
+            # The parent still holds the grab from the menu that opened
+            # this; try again rather than leaving the window unfocused.
+            self.after(50, self._focus)
+
+    def _changed(self, value):
+        percent = int(round(value))
+        self.value_label.configure(text=f"{percent}%")
+        self._on_change(percent)
 
 
 class HotkeyDialog(ctk.CTkToplevel):
