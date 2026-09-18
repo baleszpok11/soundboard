@@ -14,7 +14,7 @@ from tkinter import filedialog
 import customtkinter as ctk
 import soundfile as sf
 
-from .audio_engine import RECORD_MAX_S, SAMPLE_RATE
+from .audio_engine import RECORD_MAX_S, REPLAY_S, SAMPLE_RATE
 from .config import (
     NEW_SOUND_VOLUME,
     SOUNDS_DIR,
@@ -182,7 +182,7 @@ class SoundListMixin:
         if len(self.config["profiles"]) <= 1:
             return  # the board always has one profile
         profile = self.profile
-        if not ask_yes_no(self.root, 
+        if not ask_yes_no(self.root,
             "Delete profile",
             f"Delete the profile '{profile['name']}' and its {len(profile['sounds'])} sound(s) "
             "from the board?\n\nThe sound files themselves are not deleted.",
@@ -617,6 +617,11 @@ class SoundListMixin:
         )
         self.record_button.pack(side="left", padx=(8, 0))
         ctk.CTkButton(
+            frame, text=f"Save last {REPLAY_S}s", width=110, command=self.save_replay,
+            fg_color=COLOR_ROW, hover_color=COLOR_ROW_HOVER, text_color=COLOR_TEXT,
+            border_width=1, border_color=COLOR_BORDER,
+        ).pack(side="left", padx=(8, 0))
+        ctk.CTkButton(
             frame, text="Stop all", command=self.audio_engine.stop_all,
             fg_color=COLOR_ERROR, hover_color=COLOR_ERROR_HOVER, text_color=COLOR_ON_ERROR,
         ).pack(side="left", padx=(8, 0))
@@ -724,7 +729,7 @@ class SoundListMixin:
             self._finish_recording()
             return
         if not self.audio_engine.start_recording():
-            info(self.root, 
+            info(self.root,
                 "No microphone",
                 "Choose an input device above and wait for it to start "
                 "before recording.",
@@ -756,27 +761,59 @@ class SoundListMixin:
             text_color=COLOR_ON_ERROR, border_width=0,
         )
 
-    def _finish_recording(self, capped=False):
-        data = self.audio_engine.stop_recording()
-        self._update_record_button()
-        if data is None:
-            info(self.root, 
-                "Nothing recorded",
-                "The recording was too short to keep. Check that the input "
-                "device is the microphone you are speaking into.",
-            )
-            return
-        name = time.strftime("Recording %Y-%m-%d %H.%M.%S")
+    def _save_mic_clip(self, data, prefix):
+        """Write captured mic audio into Sounds/ and put it on the board.
+        Returns the entry's name, or None when the file could not be
+        written - the error is already on screen by then."""
+        name = time.strftime(f"{prefix} %Y-%m-%d %H.%M.%S")
         try:
             ensure_sounds_dir()
             dest = unique_path(os.path.join(SOUNDS_DIR, sanitize_filename(name + ".wav")))
             sf.write(dest, data, SAMPLE_RATE)
         except OSError as e:
-            error(self.root, "Could not save recording", str(e))
-            return
+            error(self.root, f"Could not save {prefix.lower()}", str(e))
+            return None
         self._add_sound_entry(name, os.path.basename(dest))
+        return name
+
+    def save_replay(self):
+        """Keep what the microphone heard over the last REPLAY_S, after
+        the fact. Called from the button and from its hotkey."""
+        if not self.config.get("replay_buffer", True):
+            info(
+                self.root,
+                "Replay is off",
+                f"Switch on \"Keep the last {REPLAY_S} seconds\" under the mic "
+                "controls, and the last few seconds can be saved after they "
+                "happen.",
+            )
+            return
+        data = self.audio_engine.take_replay()
+        if data is None:
+            info(
+                self.root,
+                "Nothing to save",
+                "There is nothing in the replay buffer yet. It fills while an "
+                "input device is running.",
+            )
+            return
+        self._save_mic_clip(data, "Replay")
+
+    def _finish_recording(self, capped=False):
+        data = self.audio_engine.stop_recording()
+        self._update_record_button()
+        if data is None:
+            info(self.root,
+                "Nothing recorded",
+                "The recording was too short to keep. Check that the input "
+                "device is the microphone you are speaking into.",
+            )
+            return
+        name = self._save_mic_clip(data, "Recording")
+        if name is None:
+            return
         if capped:
-            info(self.root, 
+            info(self.root,
                 "Recording stopped",
                 f"Recordings stop after {RECORD_MAX_S // 60} minutes. "
                 f"'{name}' was added to your board.",
@@ -869,7 +906,7 @@ class SoundListMixin:
         if deletable:
             files = (os.path.basename(deletable[0]) if len(deletable) == 1
                      else f"{len(deletable)} files")
-            answer = ask_yes_no_cancel(self.root, 
+            answer = ask_yes_no_cancel(self.root,
                 "Remove sound",
                 f"Remove '{sound['name']}' from the board?\n\n"
                 f"Yes: also delete {files} from the Sounds folder.\n"

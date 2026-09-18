@@ -5,7 +5,7 @@ import subprocess
 
 import customtkinter as ctk
 
-from .audio_engine import MIC_EFFECTS
+from .audio_engine import MIC_EFFECTS, REPLAY_S
 from .config import save_config
 from .dialogs import HotkeyDialog, error, warn
 from .hotkeys import (
@@ -59,8 +59,16 @@ class MicHotkeyMixin:
         self.ptt_checkbox.grid(row=1, column=0, sticky="w", pady=(6, 0))
         self.ptt_hotkey_button = ctk.CTkButton(box, text="", command=self.set_ptt_hotkey, **button)
         self.ptt_hotkey_button.grid(row=1, column=1, sticky="w", padx=8, pady=(6, 0))
+        self.replay_checkbox = ctk.CTkCheckBox(
+            box, text=f"Keep the last {REPLAY_S} seconds", command=self._on_toggle_replay, **checkbox)
+        self.replay_checkbox.grid(row=2, column=0, sticky="w", pady=(6, 0))
+        self.replay_hotkey_button = ctk.CTkButton(
+            box, text="", command=self.set_replay_hotkey, **button)
+        self.replay_hotkey_button.grid(row=2, column=1, sticky="w", padx=8, pady=(6, 0))
+        if self.config.get("replay_buffer", True):
+            self.replay_checkbox.select()
         effects = ctk.CTkFrame(box, fg_color="transparent")
-        effects.grid(row=2, column=0, columnspan=2, sticky="w", pady=(6, 0))
+        effects.grid(row=3, column=0, columnspan=2, sticky="w", pady=(6, 0))
         ctk.CTkLabel(effects, text="Voice:", text_color=COLOR_TEXT).pack(side="left")
         self.mic_effect_var = ctk.StringVar(value=self._mic_effect_label(self.config["mic_effect"]))
         ctk.CTkOptionMenu(
@@ -81,7 +89,7 @@ class MicHotkeyMixin:
         )
         self.mic_effect_label.pack(side="left")
         self.mic_status = ctk.CTkLabel(box, text="", text_color=COLOR_TEXT_DIM, anchor="w")
-        self.mic_status.grid(row=3, column=0, columnspan=2, sticky="w", pady=(4, 0))
+        self.mic_status.grid(row=4, column=0, columnspan=2, sticky="w", pady=(4, 0))
         if self.config["mic_muted"]:
             self.mute_checkbox.select()
         if self.config["push_to_talk"]:
@@ -90,6 +98,7 @@ class MicHotkeyMixin:
         self._update_mic_hotkey_buttons()
         self._update_mic_state()
         self._apply_mic_effect()
+        self._apply_replay_setting()
 
     @staticmethod
     def _mic_effect_label(name):
@@ -117,8 +126,36 @@ class MicHotkeyMixin:
     def _update_mic_hotkey_buttons(self):
         mute = self.config.get("mute_hotkey")
         ptt = self.config.get("ptt_hotkey")
+        replay = self.config.get("replay_hotkey")
         self.mute_hotkey_button.configure(text=f"Mute hotkey: {mute}" if mute else "Set mute hotkey")
         self.ptt_hotkey_button.configure(text=f"Talk key: {ptt}" if ptt else "Set talk key")
+        self.replay_hotkey_button.configure(
+            text=f"Save key: {replay}" if replay else "Set save key")
+
+    def _on_toggle_replay(self):
+        self.config["replay_buffer"] = bool(self.replay_checkbox.get())
+        save_config(self.config)
+        self._apply_replay_setting()
+
+    def _apply_replay_setting(self):
+        """Switching it off frees the buffer at the next mic block; a
+        clip cannot be saved from what was never kept."""
+        self.audio_engine.replay_enabled = bool(self.config.get("replay_buffer", True))
+
+    def set_replay_hotkey(self):
+        hotkey = self._ask_hotkey(
+            f"Save last {REPLAY_S}s hotkey", self.config.get("replay_hotkey"), owner="replay")
+        if hotkey is None:
+            return
+        self.config["replay_hotkey"] = hotkey or None
+        save_config(self.config)
+        self._update_mic_hotkey_buttons()
+        self._apply_hotkeys()
+
+    def _save_replay_from_hotkey(self):
+        # Runs on the listener thread; writing a file and touching the
+        # board belong on the main thread.
+        self.root.after(0, self.save_replay)
 
     def _update_mic_state(self):
         """Open the mic unless it's muted, or push-to-talk is on and its key
@@ -226,7 +263,7 @@ class MicHotkeyMixin:
         if not hotkey:
             return ""
         if not is_valid_hotkey(hotkey):
-            error(self.root, 
+            error(self.root,
                 "Invalid hotkey",
                 f"'{hotkey}' is not a valid hotkey. Use a format like <ctrl>+<alt>+1.",
             )
@@ -243,6 +280,7 @@ class MicHotkeyMixin:
             ("stop", "Stop all", self.config.get("stop_hotkey")),
             ("mute", "Mute mic", self.config.get("mute_hotkey")),
             ("ptt", "Push to talk", self.config.get("ptt_hotkey")),
+            ("replay", f"Save last {REPLAY_S}s", self.config.get("replay_hotkey")),
         ]
         candidates += [(s, f"'{s['name']}'", s.get("hotkey")) for s in self.sounds]
         for obj, label, other in candidates:
@@ -264,6 +302,9 @@ class MicHotkeyMixin:
             hotkey = sound.get("hotkey")
             if hotkey and is_valid_hotkey(hotkey):
                 mapping[hotkey] = (lambda s=sound: self.play_sound(s))
+        replay_hotkey = self.config.get("replay_hotkey")
+        if replay_hotkey and is_valid_hotkey(replay_hotkey):
+            mapping[replay_hotkey] = self._save_replay_from_hotkey
         stop_hotkey = self.config.get("stop_hotkey")
         if stop_hotkey and is_valid_hotkey(stop_hotkey):
             mapping[stop_hotkey] = self.audio_engine.stop_all

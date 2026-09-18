@@ -159,6 +159,8 @@ def load_config():
     config.setdefault("mic_muted", False)
     config.setdefault("mute_hotkey", None)
     config.setdefault("push_to_talk", False)
+    config.setdefault("replay_buffer", True)
+    config.setdefault("replay_hotkey", None)
     config.setdefault("mic_effect", "none")
     config.setdefault("mic_effect_amount", 70)
     config.setdefault("ptt_hotkey", None)

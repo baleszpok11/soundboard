@@ -35,6 +35,7 @@ MIC_PHONE_BAND_HZ = (300.0, 3000.0)
 # one second leaves the sine continuous.
 MIC_ROBOT_HZ = 80.0
 MIC_DRIVE_DB = 18.0
+REPLAY_S = 30  # how much of the mic the replay buffer holds
 RECORD_MAX_S = 180  # a forgotten recording stops here instead of filling memory
 RECORD_MIN_S = 0.2  # shorter than this is a mis-click, not a clip
 TEST_TONE_S = 0.8
@@ -245,6 +246,12 @@ class AudioEngine:
         self._recording = None
         self._recording_frames = 0
         self._recording_channels = 0
+        # The replay buffer: the last REPLAY_S of mic audio, kept so a
+        # clip can be saved after the thing worth keeping has happened.
+        self.replay_enabled = False
+        self._replay = collections.deque()
+        self._replay_frames = 0
+        self._replay_channels = 0
         self._active_sounds = []
         self._active_sounds_monitor = []
         self.dropouts = 0
@@ -413,6 +420,36 @@ class AudioEngine:
         with self._lock:
             self.mic_effects.set(name, amount)
 
+    def _keep_for_replay(self, block):
+        """Caller holds the lock. A device swap changes the channel count
+        under us, and old blocks of the wrong width cannot be joined to
+        new ones, so the buffer restarts instead."""
+        if block.shape[1] != self._replay_channels:
+            self._replay.clear()
+            self._replay_frames = 0
+            self._replay_channels = block.shape[1]
+        self._replay.append(block)
+        self._replay_frames += len(block)
+        while self._replay_frames - len(self._replay[0]) >= REPLAY_S * SAMPLE_RATE:
+            self._replay_frames -= len(self._replay.popleft())
+
+    def replay_seconds(self):
+        """How much audio the replay buffer is holding."""
+        with self._lock:
+            return self._replay_frames / SAMPLE_RATE
+
+    def take_replay(self):
+        """The last REPLAY_S of microphone audio, or None when there is
+        too little to be worth a clip. The buffer is left alone, so two
+        saves a few seconds apart give two overlapping clips rather than
+        one clip and one empty one."""
+        with self._lock:
+            parts = list(self._replay)
+        if not parts:
+            return None
+        data = np.concatenate(parts)
+        return data if len(data) >= RECORD_MIN_S * SAMPLE_RATE else None
+
     def start_recording(self):
         """Begin keeping the raw mic blocks the input callback receives.
         Recording is taken before mute, push-to-talk and the mic volume,
@@ -469,6 +506,11 @@ class AudioEngine:
                     and block.shape[1] == self._recording_channels):
                 self._recording.append(block)
                 self._recording_frames += len(block)
+            if self.replay_enabled:
+                self._keep_for_replay(block)
+            elif self._replay:
+                self._replay.clear()
+                self._replay_frames = 0
 
     def _on_output(self, outdata, frames, time_info, status):
         self._last_callback["output"] = time.monotonic()
