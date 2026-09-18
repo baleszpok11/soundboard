@@ -8,8 +8,9 @@ the file stays small.
 import os
 import threading
 import tkinter as tk
-from tkinter import filedialog, messagebox
+from tkinter import filedialog
 
+from .dialogs import error, info
 import customtkinter as ctk
 import yt_dlp
 
@@ -178,10 +179,10 @@ class ShareMixin:
             with open(path, "w", encoding="utf-8") as f:
                 f.write(board_file.dumps(data))
         except OSError as e:
-            messagebox.showerror("Export failed", str(e))
+            error(self.root, "Export failed", str(e))
             return
         note = f"\n\n{len(skipped)} sound(s) were left out; only downloaded clips can be shared." if skipped else ""
-        messagebox.showinfo("Exported", f"Saved to:\n{path}{note}")
+        info(self.root, "Exported", f"Saved to:\n{path}{note}")
 
     # -- import ---------------------------------------------------------
 
@@ -197,7 +198,7 @@ class ShareMixin:
             self.import_file_label.configure(text="No file chosen.", text_color=COLOR_TEXT_DIM)
             self._import_profiles = None
             self.import_button.configure(state="disabled")
-            messagebox.showerror("Can't open that file", str(e))
+            error(self.root, "Can't open that file", str(e))
             return
         self._import_profiles = profiles
         self.import_file_label.configure(text=os.path.basename(path), text_color=COLOR_TEXT)

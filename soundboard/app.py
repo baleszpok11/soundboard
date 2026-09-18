@@ -2,7 +2,6 @@
 
 import os
 import tkinter as tk
-from tkinter import messagebox
 
 import customtkinter as ctk
 
@@ -19,7 +18,7 @@ from .config import (
 )
 from .audio_engine import sd
 from .devices import DeviceMixin
-from .dialogs import ReportDialog, UpdateDialog, handle_exception
+from .dialogs import ReportDialog, UpdateDialog, handle_exception, warn
 from .download_tab import DownloadMixin
 from .editor_tab import EditorMixin
 from .mic_hotkeys import MicHotkeyMixin
@@ -64,7 +63,7 @@ class Soundboard(DeviceMixin, MicHotkeyMixin, SoundListMixin, DownloadMixin, Edi
         except (ValueError, OSError) as e:
             backup = unique_path(CONFIG_PATH + ".broken")
             os.replace(CONFIG_PATH, backup)
-            messagebox.showwarning(
+            warn(self.root, 
                 "Settings reset",
                 f"Your settings file could not be read ({e}), so Soundboard "
                 f"started with default settings.\n\nThe old file was kept as:\n{backup}",

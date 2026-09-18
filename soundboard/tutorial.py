@@ -17,6 +17,7 @@ import webbrowser
 import customtkinter as ctk
 
 from .config import ASSETS_DIR
+from .dialogs import center_on_parent
 from .theme import (
     COLOR_ACCENT_TEXT,
     COLOR_BG,
@@ -220,6 +221,7 @@ class TutorialWindow(ctk.CTkToplevel):
         self._images = []  # CTkImage is only drawn while something holds it
         self.bind("<Escape>", lambda e: self.destroy())
         self.transient(parent)
+        center_on_parent(self, parent)
         page = page if page in PAGES else current_platform()
         self.platform_picker.set(page)
         self._show_page(page)

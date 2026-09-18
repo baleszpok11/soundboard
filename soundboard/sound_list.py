@@ -9,7 +9,7 @@ import sys
 import textwrap
 import time
 import tkinter as tk
-from tkinter import filedialog, messagebox
+from tkinter import filedialog
 
 import customtkinter as ctk
 import soundfile as sf
@@ -27,7 +27,15 @@ from .config import (
     save_config,
     unique_path,
 )
-from .dialogs import TextDialog, VolumeDialog
+from .dialogs import (
+    TextDialog,
+    VolumeDialog,
+    ask_yes_no,
+    ask_yes_no_cancel,
+    error,
+    info,
+    warn,
+)
 from .theme import (
     CARD_BORDER,
     COLOR_BG,
@@ -174,7 +182,7 @@ class SoundListMixin:
         if len(self.config["profiles"]) <= 1:
             return  # the board always has one profile
         profile = self.profile
-        if not messagebox.askyesno(
+        if not ask_yes_no(self.root, 
             "Delete profile",
             f"Delete the profile '{profile['name']}' and its {len(profile['sounds'])} sound(s) "
             "from the board?\n\nThe sound files themselves are not deleted.",
@@ -661,7 +669,7 @@ class SoundListMixin:
         try:
             names = sorted(os.listdir(folder), key=str.lower)
         except OSError as e:
-            messagebox.showerror("Could not read folder", str(e))
+            error(self.root, "Could not read folder", str(e))
             return
         # Files only: a folder of albums would otherwise pull in a board
         # nobody asked for.
@@ -669,7 +677,7 @@ class SoundListMixin:
                  if os.path.splitext(name)[1].lower() in AUDIO_EXTENSIONS
                  and os.path.isfile(os.path.join(folder, name))]
         if not paths:
-            messagebox.showinfo("Nothing to add", "That folder has no wav, flac, ogg or mp3 files in it.")
+            info(self.root, "Nothing to add", "That folder has no wav, flac, ogg or mp3 files in it.")
             return
         self._add_sound_files(paths)
 
@@ -695,8 +703,7 @@ class SoundListMixin:
             self._refresh_sound_list()
         self._report_import(added, skipped, failed)
 
-    @staticmethod
-    def _report_import(added, skipped, failed):
+    def _report_import(self, added, skipped, failed):
         if not skipped and not failed:
             return  # the new rows are the confirmation
         lines = [f"Added {added} sound{'s' if added != 1 else ''}."]
@@ -704,8 +711,8 @@ class SoundListMixin:
             lines.append(f"\nAlready on the board ({len(skipped)}):\n" + _name_list(skipped))
         if failed:
             lines.append(f"\nCouldn't be added ({len(failed)}):\n" + _name_list(failed))
-        show = messagebox.showinfo if not failed else messagebox.showwarning
-        show("Add sounds", "\n".join(lines))
+        show = warn if failed else info
+        show(self.root, "Add sounds", "\n".join(lines))
 
     # -- recording ----------------------------------------------------------
 
@@ -717,7 +724,7 @@ class SoundListMixin:
             self._finish_recording()
             return
         if not self.audio_engine.start_recording():
-            messagebox.showinfo(
+            info(self.root, 
                 "No microphone",
                 "Choose an input device above and wait for it to start "
                 "before recording.",
@@ -753,7 +760,7 @@ class SoundListMixin:
         data = self.audio_engine.stop_recording()
         self._update_record_button()
         if data is None:
-            messagebox.showinfo(
+            info(self.root, 
                 "Nothing recorded",
                 "The recording was too short to keep. Check that the input "
                 "device is the microphone you are speaking into.",
@@ -765,11 +772,11 @@ class SoundListMixin:
             dest = unique_path(os.path.join(SOUNDS_DIR, sanitize_filename(name + ".wav")))
             sf.write(dest, data, SAMPLE_RATE)
         except OSError as e:
-            messagebox.showerror("Could not save recording", str(e))
+            error(self.root, "Could not save recording", str(e))
             return
         self._add_sound_entry(name, os.path.basename(dest))
         if capped:
-            messagebox.showinfo(
+            info(self.root, 
                 "Recording stopped",
                 f"Recordings stop after {RECORD_MAX_S // 60} minutes. "
                 f"'{name}' was added to your board.",
@@ -791,7 +798,7 @@ class SoundListMixin:
             try:
                 stored_path = self._import_into_sounds_dir(path)
             except OSError as e:
-                messagebox.showerror("Could not add clip", f"{os.path.basename(path)}: {e}")
+                error(self.root, "Could not add clip", f"{os.path.basename(path)}: {e}")
                 continue
             if stored_path in paths:
                 continue
@@ -862,7 +869,7 @@ class SoundListMixin:
         if deletable:
             files = (os.path.basename(deletable[0]) if len(deletable) == 1
                      else f"{len(deletable)} files")
-            answer = messagebox.askyesnocancel(
+            answer = ask_yes_no_cancel(self.root, 
                 "Remove sound",
                 f"Remove '{sound['name']}' from the board?\n\n"
                 f"Yes: also delete {files} from the Sounds folder.\n"
@@ -882,7 +889,7 @@ class SoundListMixin:
                 try:
                     os.remove(path)
                 except OSError as e:
-                    messagebox.showerror("Could not delete file", str(e))
+                    error(self.root, "Could not delete file", str(e))
 
     # -- playback -----------------------------------------------------------
 
@@ -910,4 +917,4 @@ class SoundListMixin:
 
     def _on_playback_error(self, message):
         # Called from the audio worker thread.
-        self.root.after(0, lambda: messagebox.showerror("Playback error", message))
+        self.root.after(0, lambda: error(self.root, "Playback error", message))

@@ -5,8 +5,8 @@ import sys
 import time
 import tkinter as tk
 import webbrowser
-from tkinter import messagebox
 
+from .dialogs import error
 import customtkinter as ctk
 
 from .audio_engine import SAMPLE_RATE, sd, test_tone
@@ -310,7 +310,7 @@ class DeviceMixin:
         try:
             self.audio_engine.play_data(test_tone(), SAMPLE_RATE, key=TEST_TONE_KEY)
         except RuntimeError as e:
-            messagebox.showerror("Test output", str(e))
+            error(self.root, "Test output", str(e))
 
     def _add_volume_row(self, frame, row, text, config_key, engine_attr):
         ctk.CTkLabel(frame, text=text, text_color=COLOR_TEXT_DIM, font=font("small_bold")).grid(
@@ -429,7 +429,7 @@ class DeviceMixin:
             sd._initialize()
         except Exception as e:
             if show_errors:
-                messagebox.showerror("Audio device error", f"Could not rescan audio devices: {e}")
+                error(self.root, "Audio device error", f"Could not rescan audio devices: {e}")
             return
         self.hostapi = self._pick_hostapi(self.config.get("host_api"))
         self.input_devices = self._list_devices(output=False)
@@ -451,7 +451,7 @@ class DeviceMixin:
             except Exception as e:
                 error = e
         if show_errors:
-            messagebox.showerror("Audio device error", str(error))
+            error(self.root, "Audio device error", str(error))
         self._update_device_warnings()
 
     def _fallback_to_mme(self):
