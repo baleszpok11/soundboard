@@ -251,6 +251,14 @@ class SoundListMixin:
         # believes everything fits - no scrollbar, no wheel, and every row
         # past the first screenful unreachable.
         self.list_frame.bind("<Configure>", self._on_list_resize, add="+")
+        # One box per view, because the rows pack and the tiles grid, and
+        # Tk refuses both geometry managers in the same container. Each
+        # keeps its pooled slots while the other view is on screen.
+        self.rows_box = ctk.CTkFrame(self.list_frame, fg_color="transparent")
+        self.tiles_box = ctk.CTkFrame(self.list_frame, fg_color="transparent")
+        self.empty_label = ctk.CTkLabel(self.list_frame, text="", text_color=COLOR_TEXT_DIM)
+        self._row_pool = []
+        self._tile_pool = []
         self._drag_from = None
         self._playing_widgets = {}
         self._last_clip = {}  # group key -> the member that played last
@@ -267,11 +275,14 @@ class SoundListMixin:
     def stop_sound(self, sound):
         self.audio_engine.stop_key(self._sound_key(sound))
 
-    def _poll_playing(self):
+    def _update_playing(self):
         """Mirror what the engine is playing onto the board."""
         playing = self.audio_engine.active_keys()
         for entry in self._playing_widgets.values():
             self._show_playing(entry, playing.get(entry["key"]))
+
+    def _poll_playing(self):
+        self._update_playing()
         self._playing_poll = self.root.after(PLAYING_POLL_MS, self._poll_playing)
 
     @staticmethod
@@ -317,85 +328,149 @@ class SoundListMixin:
         ]
 
     def _refresh_sound_list(self):
-        for widget in self.list_frame.winfo_children():
-            widget.destroy()
-        self._playing_widgets = {}  # rebuilt below; the poll reads it
+        """Point the pooled rows or tiles at whatever the search leaves
+        visible. The widgets are reused rather than rebuilt: tearing them
+        down and making new ones costs Tk more every time it happens, and
+        this runs on every search keystroke."""
         visible = self._visible_sounds()
-        if not visible:
-            text = "No sounds match your search." if self.sounds else "No sounds yet. Click Add sound or use the Download tab."
-            ctk.CTkLabel(self.list_frame, text=text, text_color=COLOR_TEXT_DIM).pack(pady=20)
-        elif self.config["sound_view"] == "grid":
-            self._build_sound_grid(visible)
+        grid = self.config["sound_view"] == "grid"
+        self._playing_widgets = {}  # rebound below; the poll reads it
+        if visible:
+            if self.empty_label.winfo_manager():
+                self.empty_label.pack_forget()
         else:
-            for idx, sound in visible:
-                self._build_sound_row(idx, sound)
+            self.empty_label.configure(text=(
+                "No sounds match your search." if self.sounds
+                else "No sounds yet. Click Add sound or use the Download tab."))
+            if not self.empty_label.winfo_manager():
+                self.empty_label.pack(pady=20)
+        # The unused view keeps its slots, unmapped, for when it comes back.
+        self._fill_tiles(visible if grid else [])
+        self._fill_rows([] if grid else visible)
+        # An empty box would still claim its share of the cavity, so only
+        # the one holding this view's slots is mapped.
+        for box, wanted in ((self.tiles_box, grid), (self.rows_box, not grid)):
+            if wanted and visible and not box.winfo_manager():
+                box.pack(fill="both", expand=True)
+            elif (not wanted or not visible) and box.winfo_manager():
+                box.pack_forget()
         if hasattr(self, "editor_sound_menu"):
             self._refresh_editor_sound_list()
         if hasattr(self, "export_summary"):
             self._update_export_summary()
+        # Without this the rebound slots would show the previous sound's
+        # progress and Stop button until the next poll.
+        self._update_playing()
 
-    def _build_sound_grid(self, visible):
-        columns = self._grid_column_count()
-        self._grid_columns = columns
-        for column in range(columns):
-            self.list_frame.grid_columnconfigure(column, weight=1, uniform="sound")
-        for position, (idx, sound) in enumerate(visible):
-            missing = not os.path.exists(resolve_sound_path(sound["path"]))
-            enabled = sound.get("enabled", True)
-            lines = textwrap.wrap(sound["name"], 20)[:2] or [""]
-            if len(textwrap.wrap(sound["name"], 20)) > 2:
-                lines[-1] = lines[-1][:17] + "..."
-            if missing:
-                lines.append("(file missing)")
-            else:
-                hotkey = sound.get("hotkey") or ""
-                loop = "loop" if sound.get("loop") else ""
-                clips = len(sound_paths(sound))
-                group = f"{clips} clips" if clips > 1 else ""
-                length = _clip_length(resolve_sound_path(sound["path"])) or ""
-                lines.append("  ".join(p for p in (hotkey, length, loop, group) if p) or " ")
-            # A cell, not a bare button, so the tile can carry a progress
-            # bar under it the way list rows do.
-            cell = ctk.CTkFrame(self.list_frame, fg_color="transparent")
-            cell.grid(row=position // columns, column=position % columns, sticky="ew", padx=4, pady=4)
-            button = ctk.CTkButton(
-                cell, text="\n".join(lines), height=84,
-                command=lambda s=sound: self.play_sound(s),
-                fg_color=COLOR_ORANGE if enabled and not missing else COLOR_ROW,
-                hover_color=COLOR_ORANGE_HOVER,
-                text_color=COLOR_ON_ACCENT if enabled and not missing else (COLOR_ERROR if missing else COLOR_TEXT_DIM),
-            )
-            button.pack(fill="x")
-            menu = lambda e, i=idx: self._show_sound_menu(e, i, from_tile=True)
-            button.bind("<Button-3>", menu)
-            button.bind("<Button-2>" if sys.platform == "darwin" else "<Control-Button-1>", menu)
-            progress = ctk.CTkProgressBar(
-                cell, height=3, corner_radius=0, fg_color=COLOR_SURFACE, progress_color=COLOR_SURFACE,
-            )
-            progress.set(0)
-            progress.pack(fill="x", pady=(2, 0))
-            # Tiles are a single button, so stopping is done from the menu.
-            self._playing_widgets[idx] = {
-                "key": self._sound_key(sound), "progress": progress,
-                "stop": None, "before": None,
-            }
+    def _fill_rows(self, visible):
+        while len(self._row_pool) < len(visible):
+            self._row_pool.append(self._make_row())
+        for slot, (idx, sound) in zip(self._row_pool, visible):
+            self._bind_row(slot, idx, sound)
+            if not slot["mapped"]:
+                # Only the tail is ever unmapped, so the packed slots stay
+                # in pool order and a repacked slot cannot jump to the end.
+                slot["outer"].pack(fill="x", pady=3, padx=2)
+                slot["mapped"] = True
+        # Tracked here rather than asked of Tk: winfo_manager() is a round
+        # trip into Tcl, and this walks the whole pool on every keystroke.
+        for slot in self._row_pool[len(visible):]:
+            if slot["mapped"]:
+                slot["outer"].pack_forget()
+                slot["mapped"] = False
 
-    def _build_sound_row(self, idx, sound):
-        resolved_path = resolve_sound_path(sound["path"])
+    def _fill_tiles(self, visible):
+        columns = self._grid_column_count() if visible else self._grid_columns
+        if columns != self._grid_columns:
+            for column in range(max(columns, self._grid_columns)):
+                self.tiles_box.grid_columnconfigure(
+                    column, weight=1 if column < columns else 0,
+                    uniform="sound" if column < columns else "",
+                )
+            self._grid_columns = columns
+        while len(self._tile_pool) < len(visible):
+            self._tile_pool.append(self._make_tile())
+        for position, (slot, (idx, sound)) in enumerate(zip(self._tile_pool, visible)):
+            self._bind_tile(slot, idx, sound)
+            slot["cell"].grid(
+                row=position // columns, column=position % columns,
+                sticky="ew", padx=4, pady=4,
+            )
+            slot["mapped"] = True
+        for slot in self._tile_pool[len(visible):]:
+            if slot["mapped"]:
+                slot["cell"].grid_remove()
+                slot["mapped"] = False
+
+    def _make_tile(self):
+        """One reusable tile. The callbacks read the slot's binding when
+        they fire rather than capturing an index, so rebinding the slot to
+        another sound is enough to retarget them."""
+        slot = {"idx": None, "sound": None, "mapped": False}
+        # A cell, not a bare button, so the tile can carry a progress
+        # bar under it the way list rows do.
+        cell = ctk.CTkFrame(self.tiles_box, fg_color="transparent")
+        button = ctk.CTkButton(
+            cell, text="", height=84,
+            command=lambda: self.play_sound(slot["sound"]),
+            hover_color=COLOR_ORANGE_HOVER,
+        )
+        button.pack(fill="x")
+        menu = lambda e: self._show_sound_menu(e, slot["idx"], from_tile=True)
+        button.bind("<Button-3>", menu)
+        button.bind("<Button-2>" if sys.platform == "darwin" else "<Control-Button-1>", menu)
+        progress = ctk.CTkProgressBar(
+            cell, height=3, corner_radius=0, fg_color=COLOR_SURFACE, progress_color=COLOR_SURFACE,
+        )
+        progress.set(0)
+        progress.pack(fill="x", pady=(2, 0))
+        slot.update(cell=cell, button=button, progress=progress)
+        return slot
+
+    def _bind_tile(self, slot, idx, sound):
+        slot["idx"], slot["sound"] = idx, sound
+        missing = not os.path.exists(resolve_sound_path(sound["path"]))
+        enabled = sound.get("enabled", True)
+        lines = textwrap.wrap(sound["name"], 20)[:2] or [""]
+        if len(textwrap.wrap(sound["name"], 20)) > 2:
+            lines[-1] = lines[-1][:17] + "..."
+        if missing:
+            lines.append("(file missing)")
+        else:
+            hotkey = sound.get("hotkey") or ""
+            loop = "loop" if sound.get("loop") else ""
+            clips = len(sound_paths(sound))
+            group = f"{clips} clips" if clips > 1 else ""
+            length = _clip_length(resolve_sound_path(sound["path"])) or ""
+            lines.append("  ".join(p for p in (hotkey, length, loop, group) if p) or " ")
+        slot["button"].configure(
+            text="\n".join(lines),
+            fg_color=COLOR_ORANGE if enabled and not missing else COLOR_ROW,
+            text_color=COLOR_ON_ACCENT if enabled and not missing else (COLOR_ERROR if missing else COLOR_TEXT_DIM),
+        )
+        # Tiles are a single button, so stopping is done from the menu.
+        self._playing_widgets[idx] = {
+            "key": self._sound_key(sound), "progress": slot["progress"],
+            "stop": None, "before": None,
+        }
+
+    def _make_row(self):
+        """One reusable list row, built empty; see _make_tile on why the
+        callbacks go through the slot."""
+        slot = {"idx": None, "sound": None, "mapped": False}
         # The outer frame carries the drag target and the progress bar; the
         # inner one keeps the controls on a single line.
         outer = ctk.CTkFrame(
-            self.list_frame, fg_color=COLOR_SURFACE, corner_radius=RADIUS_CONTROL,
+            self.rows_box, fg_color=COLOR_SURFACE, corner_radius=RADIUS_CONTROL,
             border_width=CARD_BORDER, border_color=COLOR_BORDER,
         )
-        outer.pack(fill="x", pady=3, padx=2)
-        outer.sound_index = idx
+        outer.sound_index = None
         row = ctk.CTkFrame(outer, fg_color="transparent")
         row.pack(fill="x")
 
         handle = ctk.CTkLabel(row, text="::", width=16, text_color=COLOR_TEXT_DIM, cursor="fleur")
         handle.pack(side="left", padx=(8, 0))
-        handle.bind("<ButtonPress-1>", lambda e, i=idx: self._start_drag(i))
+        handle.bind("<ButtonPress-1>", lambda e: self._start_drag(slot["idx"]))
         handle.bind("<B1-Motion>", self._on_drag)
         handle.bind("<ButtonRelease-1>", self._end_drag)
 
@@ -407,27 +482,86 @@ class SoundListMixin:
             hover_color=COLOR_ORANGE_HOVER,
             checkmark_color=COLOR_ON_ACCENT,
         )
-        if sound.get("enabled", True):
-            checkbox.select()
-        else:
-            checkbox.deselect()
-        checkbox.configure(command=lambda i=idx, cb=checkbox: self._on_toggle_sound(i, cb))
+        checkbox.configure(command=lambda: self._on_toggle_sound(slot["idx"], checkbox))
         checkbox.pack(side="left", padx=(6, 4))
 
-        missing = not os.path.exists(resolved_path)
-        name = sound["name"]
-        if len(name) > 40:  # long titles would push the buttons out of the row
-            name = name[:37] + "..."
         # Name and status are two labels, not one string: the name is what
         # the eye looks for, and running them together at one weight made
         # the hotkey and the warnings compete with it.
         names = ctk.CTkFrame(row, fg_color="transparent")
         names.pack(side="left", fill="x", expand=True, padx=GAP)
-        label = ctk.CTkLabel(
-            names, text=name, anchor="w", font=font("body_bold"),
-            text_color=COLOR_ERROR_TEXT if missing else COLOR_TEXT,
-        )
+        label = ctk.CTkLabel(names, text="", anchor="w", font=font("body_bold"))
         label.pack(fill="x")
+        meta_label = ctk.CTkLabel(names, text="", anchor="w", font=font("small"))
+        meta_label.pack(fill="x")
+        for widget in (label, meta_label):
+            widget.bind("<Double-Button-1>", lambda e: self.rename_sound(slot["idx"]))
+
+        volume_label = ctk.CTkLabel(
+            row, text="", width=42,
+            font=font("small"), text_color=COLOR_TEXT_DIM,
+        )
+        volume_slider = ctk.CTkSlider(
+            row, from_=0, to=VOLUME_MAX, number_of_steps=VOLUME_MAX, width=100,
+            command=lambda value: self._on_sound_volume(slot["sound"], volume_label, value),
+        )
+        volume_slider.pack(side="left", padx=(3, 0))
+        volume_label.pack(side="left", padx=(0, 3))
+
+        ctk.CTkButton(
+            row, text="Play", width=64, font=font("body_bold"),
+            command=lambda: self.play_sound(slot["sound"]),
+            fg_color=COLOR_ORANGE, hover_color=COLOR_ORANGE_HOVER, text_color=COLOR_ON_ACCENT,
+        ).pack(side="left", padx=3)
+        # Built now, shown only while this sound is playing, so an idle
+        # board isn't a wall of dead buttons.
+        stop = ctk.CTkButton(
+            row, text="Stop", width=60,
+            command=lambda: self.stop_sound(slot["sound"]),
+            fg_color=COLOR_ERROR, hover_color=COLOR_ERROR_HOVER, text_color=COLOR_ON_ERROR,
+        )
+        hotkey_button = ctk.CTkButton(
+            row, text="Hotkey", width=70,
+            command=lambda: self.set_hotkey(slot["idx"]),
+            fg_color=COLOR_ROW, hover_color=COLOR_ROW_HOVER, text_color=COLOR_TEXT,
+            border_width=1, border_color=COLOR_BORDER,
+        )
+        hotkey_button.pack(side="left", padx=3)
+        more = ctk.CTkButton(
+            row, text="More", width=60,
+            fg_color=COLOR_ROW, hover_color=COLOR_ROW_HOVER, text_color=COLOR_TEXT,
+            border_width=1, border_color=COLOR_BORDER,
+        )
+        more.configure(command=lambda: self._show_sound_menu(None, slot["idx"], anchor=more))
+        more.pack(side="left", padx=(3, 8))
+
+        progress = ctk.CTkProgressBar(
+            outer, height=3, corner_radius=0,
+            fg_color=COLOR_SURFACE, progress_color=COLOR_SURFACE,
+        )
+        progress.set(0)
+        progress.pack(fill="x", padx=8, pady=(0, 4))
+        slot.update(
+            outer=outer, checkbox=checkbox, label=label, meta=meta_label,
+            volume=volume_slider, volume_label=volume_label, stop=stop,
+            hotkey=hotkey_button, progress=progress,
+        )
+        return slot
+
+    def _bind_row(self, slot, idx, sound):
+        slot["idx"], slot["sound"] = idx, sound
+        slot["outer"].sound_index = idx
+        resolved_path = resolve_sound_path(sound["path"])
+        missing = not os.path.exists(resolved_path)
+        if sound.get("enabled", True):
+            slot["checkbox"].select()
+        else:
+            slot["checkbox"].deselect()
+        name = sound["name"]
+        if len(name) > 40:  # long titles would push the buttons out of the row
+            name = name[:37] + "..."
+        slot["label"].configure(
+            text=name, text_color=COLOR_ERROR_TEXT if missing else COLOR_TEXT)
         meta = [sound.get("hotkey") or "no hotkey"]
         length = _clip_length(resolved_path)
         if length is not None:
@@ -439,62 +573,14 @@ class SoundListMixin:
             meta.append("loop")
         if missing:
             meta.append("file missing")
-        meta_label = ctk.CTkLabel(
-            names, text="  -  ".join(meta), anchor="w", font=font("small"),
-            text_color=COLOR_ERROR_TEXT if missing else COLOR_TEXT_DIM,
-        )
-        meta_label.pack(fill="x")
-        for widget in (label, meta_label):
-            widget.bind("<Double-Button-1>", lambda e, i=idx: self.rename_sound(i))
-
-        volume_label = ctk.CTkLabel(
-            row, text=f"{sound['volume']}%", width=42,
-            font=font("small"), text_color=COLOR_TEXT_DIM,
-        )
-        volume_slider = ctk.CTkSlider(
-            row, from_=0, to=VOLUME_MAX, number_of_steps=VOLUME_MAX, width=100,
-            command=lambda value, s=sound, lbl=volume_label: self._on_sound_volume(s, lbl, value),
-        )
-        volume_slider.set(sound["volume"])
-        volume_slider.pack(side="left", padx=(3, 0))
-        volume_label.pack(side="left", padx=(0, 3))
-
-        ctk.CTkButton(
-            row, text="Play", width=64, font=font("body_bold"),
-            command=lambda s=sound: self.play_sound(s),
-            fg_color=COLOR_ORANGE, hover_color=COLOR_ORANGE_HOVER, text_color=COLOR_ON_ACCENT,
-        ).pack(side="left", padx=3)
-        # Built now, shown only while this sound is playing, so an idle
-        # board isn't a wall of dead buttons.
-        stop = ctk.CTkButton(
-            row, text="Stop", width=60,
-            command=lambda s=sound: self.stop_sound(s),
-            fg_color=COLOR_ERROR, hover_color=COLOR_ERROR_HOVER, text_color=COLOR_ON_ERROR,
-        )
-        hotkey_button = ctk.CTkButton(
-            row, text="Hotkey", width=70,
-            command=lambda i=idx: self.set_hotkey(i),
-            fg_color=COLOR_ROW, hover_color=COLOR_ROW_HOVER, text_color=COLOR_TEXT,
-            border_width=1, border_color=COLOR_BORDER,
-        )
-        hotkey_button.pack(side="left", padx=3)
-        more = ctk.CTkButton(
-            row, text="More", width=60,
-            fg_color=COLOR_ROW, hover_color=COLOR_ROW_HOVER, text_color=COLOR_TEXT,
-            border_width=1, border_color=COLOR_BORDER,
-        )
-        more.configure(command=lambda i=idx, b=more: self._show_sound_menu(None, i, anchor=b))
-        more.pack(side="left", padx=(3, 8))
-
-        progress = ctk.CTkProgressBar(
-            outer, height=3, corner_radius=0,
-            fg_color=COLOR_SURFACE, progress_color=COLOR_SURFACE,
-        )
-        progress.set(0)
-        progress.pack(fill="x", padx=8, pady=(0, 4))
+        slot["meta"].configure(
+            text="  -  ".join(meta),
+            text_color=COLOR_ERROR_TEXT if missing else COLOR_TEXT_DIM)
+        slot["volume"].set(sound["volume"])
+        slot["volume_label"].configure(text=f"{sound['volume']}%")
         self._playing_widgets[idx] = {
-            "key": self._sound_key(sound), "progress": progress,
-            "stop": stop, "before": hotkey_button,
+            "key": self._sound_key(sound), "progress": slot["progress"],
+            "stop": slot["stop"], "before": slot["hotkey"],
         }
 
     def _show_sound_menu(self, event, index, anchor=None, from_tile=False):
