@@ -68,6 +68,10 @@ CONFIG_PATH = os.path.join(APP_DIR, "soundboard_config.json")
 SOUNDS_DIR = os.path.join(APP_DIR, "Sounds")
 ASSETS_DIR = os.path.join(getattr(sys, "_MEIPASS", _PROJECT_ROOT), "assets")
 ICON_PATH = os.path.join(ASSETS_DIR, "icon.png")
+# Windows wants an .ico: iconphoto() is ignored there by
+# CustomTkinter, which only leaves an icon alone once
+# iconbitmap() has been called.
+ICON_ICO_PATH = os.path.join(ASSETS_DIR, "icon.ico")
 
 
 def ensure_sounds_dir():
