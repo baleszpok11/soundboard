@@ -98,8 +98,9 @@ PAGES = {
         ("link", "Open vb-audio.com/Cable", CABLE_URL),
         ("link", "Open VirtualAudioCable on GitHub", VAC_URL),
         ("step", "Point Soundboard at it",
-         "On the Soundboard tab, set Microphone to your real microphone and "
-         "Virtual mic output to CABLE Input. " + _BOTH_ENDS),
+         "Open the Settings tab, or the Settings button on the Soundboard "
+         "tab, and set Microphone to your real microphone and Virtual mic "
+         "output to CABLE Input. " + _BOTH_ENDS),
         ("shot", "devices-windows", "What the two dropdowns should say."),
         ("step", "Check it before you go live", _CHECK),
         ("shot", "test-windows", "The output meter moves while the tone plays."),
@@ -121,8 +122,9 @@ PAGES = {
          "one you want. Install it and reboot." + _NO_CABLE),
         ("link", "Open BlackHole on GitHub", BLACKHOLE_URL),
         ("step", "Point Soundboard at it",
-         "On the Soundboard tab, set Microphone to your real microphone and "
-         "Virtual mic output to BlackHole 2ch. " + _BOTH_ENDS),
+         "Open the Settings tab, or the Settings button on the Soundboard "
+         "tab, and set Microphone to your real microphone and Virtual mic "
+         "output to BlackHole 2ch. " + _BOTH_ENDS),
         ("shot", "devices-macos", "What the two dropdowns should say."),
         ("step", "Allow the microphone",
          "macOS asks for microphone permission the first time. If you "
@@ -160,8 +162,9 @@ PAGES = {
          "source_name=soundboard_mic "
          "source_properties=device.description=Soundboard_Mic"),
         ("step", "Point Soundboard at pulse",
-         "Set both Microphone and Virtual mic output to pulse, or to "
-         "default if there is no pulse. The real choice happens in "
+         "Open the Settings tab, or the Settings button on the Soundboard "
+         "tab, and set both Microphone and Virtual mic output to pulse, or "
+         "to default if there is no pulse. The real choice happens in "
          "pavucontrol."),
         ("shot", "devices-linux", "What the two dropdowns should say."),
         ("step", "Route it in pavucontrol",

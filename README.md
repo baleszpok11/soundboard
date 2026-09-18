@@ -145,8 +145,9 @@ startup config to keep them.
 Soundboard can't list PulseAudio/PipeWire devices by name, so the routing
 is done in `pavucontrol` (install it from your package manager):
 
-1. In Soundboard, set both **Microphone** and **Virtual mic output** to
-   `pulse` (or `default` if there's no `pulse`).
+1. In Soundboard's **Settings** tab (or behind the **Settings** button on
+   the Soundboard tab), set both **Microphone** and **Virtual mic output**
+   to `pulse` (or `default` if there's no `pulse`).
 2. Play a sound. In pavucontrol's **Playback** tab, find Soundboard's
    stream and switch it to **Soundboard**.
 3. In pavucontrol's **Recording** tab, switch Soundboard's stream to your
@@ -178,6 +179,10 @@ moved, so the old folder stays exactly as it was until you delete it
 yourself.
 
 ## Usage
+
+The device pickers, volumes, mic options, startup and appearance all live
+on the **Settings** tab. The same panel opens under the **Settings**
+button on the Soundboard tab, so the board itself keeps the window.
 
 - **Microphone (input):** your real microphone — this is what gets mixed
   with sound clips and sent onward.

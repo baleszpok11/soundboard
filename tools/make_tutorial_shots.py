@@ -76,7 +76,14 @@ def shoot(root, name, *widgets, pad=PAD):
     root.update_idletasks()
     root.update()
     box = bbox(*widgets, pad=pad)
-    image = ImageGrab.grab(xdisplay=os.environ.get("DISPLAY")).crop(box)
+    screen = ImageGrab.grab(xdisplay=os.environ.get("DISPLAY"))
+    # Tk reports geometry in points and the grab comes back in pixels,
+    # which are the same thing on X11 and not on a Retina screen: there
+    # the crop would land in the top left quarter of the window.
+    scale = screen.width / root.winfo_screenwidth()
+    if scale != 1:
+        box = tuple(round(edge * scale) for edge in box)
+    image = screen.crop(box)
     if image.size[0] < 40 or image.size[1] < 20:
         raise SystemExit(f"{name}: cropped to {image.size}, which is not a screenshot")
     if len(image.getcolors(maxcolors=1 << 16) or [(0, 0)]) < 3:
@@ -130,6 +137,12 @@ def main():
     if board._meter_poll is not None:
         root.after_cancel(board._meter_poll)
         board._meter_poll = None
+    # The settings panel is collapsed on the Soundboard tab, and a crop
+    # follows widget geometry: an unmapped panel has none to follow. The
+    # help talks the reader through the Soundboard tab, so open it there
+    # rather than shooting the Settings tab.
+    board.settings_open = True
+    board._place_settings_panel()
     root.update()
 
     # The row labels say which dropdown is which, so they belong in the
