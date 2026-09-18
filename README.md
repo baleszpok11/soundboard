@@ -58,6 +58,8 @@ together, from one virtual microphone.
   one under **Appearance**
 - **Record** button: capture a clip straight from your microphone into
   the board, without leaving the app
+- Replay buffer: the last 30 seconds of your mic are always kept, so
+  "Save last 30s" (or its hotkey) keeps something after it happened
 - Add sounds in bulk: pick several files at once, or point it at a
   folder and take every clip in it
 - All sounds live in one `Sounds/` folder
