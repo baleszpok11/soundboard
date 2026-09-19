@@ -46,7 +46,7 @@ from .theme import (
     set_appearance,
     wrap_to_width,
 )
-from . import updater
+from . import backups, updater
 from .tray import TrayMixin
 from .tutorial import TutorialWindow
 
@@ -77,6 +77,11 @@ class Soundboard(DeviceMixin, MicHotkeyMixin, SoundListMixin, DownloadMixin, Edi
             )
             self.config = load_config()
         is_first_run = not os.path.exists(CONFIG_PATH)
+        # A copy of the settings file as it was when the app started,
+        # before anything here can write to it. Once a day and kept for a
+        # week: a board exists only inside this one file, and a profile
+        # deleted by accident cannot be got back any other way.
+        backups.backup_daily()
 
         # The look has to be in place before the first widget is built:
         # CustomTkinter reads its defaults at widget construction, so a
