@@ -91,6 +91,8 @@ class Soundboard(DeviceMixin, MicHotkeyMixin, SoundListMixin, DownloadMixin, Edi
 
         self.audio_engine = AudioEngine()
         self.audio_engine.on_error = self._on_playback_error
+        self.audio_engine.on_finished = self._on_clip_finished
+        self._transport_key = None  # the entry Next and Previous step from
         self.hotkey_listener = None
         self.tray_icon = None
         self._pending_save = None
@@ -202,6 +204,9 @@ class Soundboard(DeviceMixin, MicHotkeyMixin, SoundListMixin, DownloadMixin, Edi
         # the fixed-height row against the bottom first and the list takes
         # the rest. The editor tab does the same thing for the same reason.
         self._build_controls(board_tab)
+        # After the controls and before the list: both pack against the
+        # bottom, so this lands between them.
+        self._build_transport(board_tab)
         self._build_sound_list(board_tab)
 
         self._build_download_tab(download_tab)

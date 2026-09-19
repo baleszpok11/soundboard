@@ -18,6 +18,9 @@ together, from one virtual microphone.
   without removing it from the board
 - Profiles: keep separate boards for different games or groups and switch
   between them, each with its own sounds and hotkeys
+- Transport controls: pause and resume without losing your place, drag a
+  row's progress bar to seek, step through the board with Previous and
+  Next, or let Continuous play the profile as a list - all with hotkeys
 - **Import / Export** tab: share a board as a small file of links, not
   audio - whoever opens it downloads their own copy of each clip - or as
   a bundle that carries the clips, for a board of recordings and edits
@@ -368,6 +371,27 @@ button on the Soundboard tab, so the board itself keeps the window.
   Clean is the safe one, but it also gives away the loudness: the same
   bass boost comes out roughly three times quieter than letting it clip.
   The original file is never changed, whichever you pick.
+
+### Playing a long clip
+
+A clip longer than a meme needs more than play and stop:
+
+- **Pause** holds everything that is playing and keeps its place;
+  pressing it again carries on from there. A held clip's progress bar
+  goes grey rather than orange.
+- **Seek** by dragging the progress bar on the clip's own row (or under
+  its tile in grid view). Clicking a row that isn't playing does
+  nothing - the bar is not a play button.
+- **Previous** and **Next** step through the profile in board order,
+  skipping anything switched off or whose file is missing, and wrap
+  round at the ends.
+- **Continuous** plays the profile as a list: when a clip ends, the next
+  one starts. It stops at the end of the list rather than looping round,
+  and only follows the clip the list is on - triggering something else
+  by hand doesn't hijack the run.
+
+Each of the three has its own global hotkey, set from the buttons on the
+right of the same row.
 
 ### Sharing a board
 

@@ -47,6 +47,9 @@ MIC_TARGET_FRAMES = SAMPLE_RATE // 10  # 100 ms cushion against uneven mic deliv
 MIC_MAX_FRAMES = SAMPLE_RATE // 2  # drop older mic audio beyond 500 ms
 CLIP_CACHE_BYTES = 512 * 1024 * 1024  # decoded clips kept in memory
 LIMITER_CEILING = 0.89  # about -1 dBFS
+# The ramp a seek fades back in over: long enough to cover the step, far
+# too short to hear as a fade.
+SEEK_RAMP_FRAMES = SAMPLE_RATE // 200  # 5 ms
 LIMITER_RELEASE_S = 0.3
 # Ducking the mic under a clip. Down fast enough that the voice is out of
 # the way before the clip is audible, back up slowly enough that a board
@@ -155,6 +158,11 @@ class _ActiveSound:
         self.position = 0
         self.played = 0  # frames emitted, counted across loop passes
         self.stopping = False
+        self.paused = False
+        # A seek jumps into the middle of a waveform, which is a step in
+        # the signal and a click. A few milliseconds of ramp covers it.
+        self._ramp_total = 0
+        self._ramp_left = 0
         self._fade_in = int(fades.fade_in * SAMPLE_RATE)
         self._fade_out = int(fades.fade_out * SAMPLE_RATE)
         self._stop_total = 0
@@ -184,12 +192,28 @@ class _ActiveSound:
         self._stop_total = max(0, frames)
         self._stop_left = self._stop_total
 
+    def seek(self, fraction):
+        """Jump to a fraction of the clip, 0 to 1. Keeps playing from
+        there rather than restarting: the clip is already decoded and in
+        the mix, and a restart would reload it and lose the loop pass it
+        is on."""
+        if not len(self.data):
+            return
+        position = int(min(1.0, max(0.0, fraction)) * len(self.data))
+        self.position = min(position, max(0, self._body - 1))
+        self._ramp_total = self._ramp_left = SEEK_RAMP_FRAMES
+
     def read(self, frames):
         channels = self.data.shape[1]
         if not len(self.data):
             # An empty clip has nothing to wrap around, so looping it
             # would spin forever.
             return np.zeros((frames, channels), dtype=np.float32), True
+        if self.paused and not self.stopping:
+            # Silence, and the position stays where it is. The clip is
+            # still in the mix, so resuming is a flag rather than a
+            # reload.
+            return np.zeros((frames, channels), dtype=np.float32), False
         if self.stopping and self._stop_left <= 0:
             return np.zeros((frames, channels), dtype=np.float32), True
         start_played, start_position = self.played, self.position
@@ -199,6 +223,8 @@ class _ActiveSound:
             envelope = self._envelope(len(chunk), start_played, start_position)
             chunk = chunk * envelope if envelope is not None else chunk * self.gain
         self.played += len(chunk)
+        if self._ramp_left > 0:
+            self._ramp_left -= len(chunk)
         if self.stopping:
             self._stop_left -= len(chunk)
             finished = finished or self._stop_left <= 0
@@ -252,6 +278,10 @@ class _ActiveSound:
             left = len(self.data) - (start_position + np.arange(n, dtype=np.float32))
             out = np.clip(left / self._fade_out, 0.0, 1.0)
             envelope = out if envelope is None else envelope * out
+        if self._ramp_total and self._ramp_left > 0:
+            done = (self._ramp_total - self._ramp_left) + np.arange(n, dtype=np.float32)
+            ramp = np.clip(done / self._ramp_total, 0.0, 1.0)
+            envelope = ramp if envelope is None else envelope * ramp
         if self.stopping and self._stop_total:
             left = self._stop_left - np.arange(n, dtype=np.float32)
             stop = np.clip(left / self._stop_total, 0.0, 1.0)
@@ -452,6 +482,12 @@ class AudioEngine:
         self._output_limiter = _Limiter()
         self._monitor_limiter = _Limiter()
         self.on_error = None
+        # Called with the key of a clip that ended by itself - not one
+        # that was stopped, and not a loop, which has no end. It runs on
+        # the audio thread, so what it is given has to hand the work
+        # straight to the Tk thread.
+        self.on_finished = None
+        self._ended = []  # keys that ended in the block being mixed
         self._started_at = 0.0
         self._last_callback = {}
         self._clip_cache = collections.OrderedDict()
@@ -592,6 +628,57 @@ class AudioEngine:
             for sound in (*self._active_sounds, *self._active_sounds_monitor):
                 if matches(sound):
                     sound.begin_stop(frames)
+
+    def pause_key(self, key, paused=True):
+        """Hold a playing clip where it is, or let it go on again. The
+        clip stays in the mix either way, so nothing is decoded twice and
+        the position is kept by the clip itself."""
+        with self._lock:
+            for sound in (*self._active_sounds, *self._active_sounds_monitor):
+                if sound.key == key and not sound.stopping:
+                    sound.paused = paused
+
+    def toggle_pause(self, key):
+        """Pause or resume whatever is playing under this key. Returns
+        the state it ended up in, or None when nothing is playing."""
+        with self._lock:
+            found = [s for s in (*self._active_sounds, *self._active_sounds_monitor)
+                     if s.key == key and not s.stopping]
+            if not found:
+                return None
+            paused = not found[0].paused
+            for sound in found:
+                sound.paused = paused
+            return paused
+
+    def pause_all(self, paused=True):
+        """Every clip at once, for one key on the keyboard rather than
+        one per sound."""
+        with self._lock:
+            for sound in (*self._active_sounds, *self._active_sounds_monitor):
+                if not sound.stopping:
+                    sound.paused = paused
+
+    def anything_playing(self):
+        """Whether a clip is in the mix, paused or not."""
+        with self._lock:
+            return any(not s.stopping for s in
+                       (*self._active_sounds, *self._active_sounds_monitor))
+
+    def paused_keys(self):
+        """The keys of the clips that are holding rather than playing."""
+        with self._lock:
+            return {s.key for s in (*self._active_sounds, *self._active_sounds_monitor)
+                    if s.paused and not s.stopping and s.key is not None}
+
+    def seek_key(self, key, fraction):
+        """Move the clip playing under this key to a fraction of its
+        length. Both copies move together, so the cable and the
+        headphones stay in step."""
+        with self._lock:
+            for sound in (*self._active_sounds, *self._active_sounds_monitor):
+                if sound.key == key and not sound.stopping:
+                    sound.seek(fraction)
 
     def active_keys(self):
         """Every key currently playing, mapped to how far that clip has
@@ -745,8 +832,12 @@ class AudioEngine:
                 mixed *= target
             # Before _mix_sounds, which drops the clips that end in this
             # block: what matters is whether one is playing into it.
-            playing = bool(self._active_sounds)
-            sounds = self._mix_sounds("_active_sounds", frames, self.output_channels)
+            # A paused clip is not playing as far as the mic is
+            # concerned: holding one would otherwise hold the duck down
+            # with it.
+            playing = any(not s.paused for s in self._active_sounds)
+            sounds = self._mix_sounds("_active_sounds", frames, self.output_channels,
+                                      report_ends=True)
             # Only the mic is ducked, and only here. The monitor callback
             # carries clips alone, so what you hear locally is untouched
             # and the duck reaches the cable, which is where the voice and
@@ -755,27 +846,54 @@ class AudioEngine:
             mixed += sounds
         outdata[:] = self._output_limiter.process(mixed)
         self.output_peak = self._output_limiter.peak
+        self._report_ends()
 
     def _on_monitor_output(self, outdata, frames, time_info, status):
         with self._lock:
             if status:
                 self.dropouts += 1
-            mixed = self._mix_sounds("_active_sounds_monitor", frames, self.monitor_channels)
+            # Only when there is no output stream to report them: with
+            # both running, the same clip ends in both lists.
+            mixed = self._mix_sounds("_active_sounds_monitor", frames, self.monitor_channels,
+                                     report_ends=self.output_stream is None)
         outdata[:] = self._monitor_limiter.process(mixed)
+        self._report_ends()
 
-    def _mix_sounds(self, attr, frames, channels):
+    def _mix_sounds(self, attr, frames, channels, report_ends=False):
         """Sum one block from each clip in the named list, drop finished
-        clips, and apply the soundboard volume. Caller holds the lock."""
+        clips, and apply the soundboard volume. Caller holds the lock.
+
+        `report_ends` is set by one caller only: the two lists hold the
+        same clip twice, once per stream, and a board that plays the next
+        clip when one ends must hear about it once.
+        """
         mixed = np.zeros((frames, channels), dtype=np.float32)
         still_active = []
         for sound in getattr(self, attr):
             chunk, finished = sound.read(frames)
             mixed += chunk
-            if not finished:
+            if finished:
+                # Stopped by hand, or swapped out for a re-trigger: that
+                # is not a clip reaching its end.
+                if report_ends and not sound.stopping and sound.key is not None:
+                    self._ended.append(sound.key)
+            else:
                 still_active.append(sound)
         setattr(self, attr, still_active)
         mixed *= self.sound_gain
         return mixed
+
+    def _report_ends(self):
+        """Hand out the keys of the clips that ended in this block, with
+        the lock released: the callback is somebody else's code, and
+        calling it from inside the lock is how a deadlock gets written
+        later."""
+        if not self._ended:
+            return
+        ended, self._ended = self._ended, []
+        if self.on_finished is not None:
+            for key in ended:
+                self.on_finished(key)
 
     def _pull_mic_frames(self, frames, channels):
         out = np.zeros((frames, channels), dtype=np.float32)
