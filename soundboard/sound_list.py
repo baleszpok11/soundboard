@@ -67,6 +67,7 @@ from .theme import (
 )
 
 PLAYING_POLL_MS = 100  # how often the board re-reads what the engine is playing
+PAUSE_TEXT, RESUME_TEXT = "Pause", "Resume"
 ROW_PAD_X, ROW_PAD_Y = 2, 3  # gap around a list row, was its pack padding
 TILE_PAD = 4  # gap around a grid tile, was its grid padding
 RECORD_POLL_MS = 200  # how often the Record button's elapsed time is redrawn
@@ -279,15 +280,19 @@ class SoundListMixin:
     def _update_playing(self):
         """Mirror what the engine is playing onto the board."""
         playing = self.audio_engine.active_keys()
+        paused = self.audio_engine.paused_keys()
         for entry in self._playing_widgets.values():
-            self._show_playing(entry, playing.get(entry["key"]))
+            self._show_playing(entry, playing.get(entry["key"]),
+                               entry["key"] in paused)
+        if hasattr(self, "pause_button"):
+            self.pause_button.configure(text=RESUME_TEXT if paused else PAUSE_TEXT)
 
     def _poll_playing(self):
         self._update_playing()
         self._playing_poll = self.root.after(PLAYING_POLL_MS, self._poll_playing)
 
     @staticmethod
-    def _show_playing(entry, fraction):
+    def _show_playing(entry, fraction, paused=False):
         progress, stop = entry["progress"], entry["stop"]
         idle = progress.cget("fg_color")
         if fraction is None:
@@ -296,10 +301,35 @@ class SoundListMixin:
             if stop is not None and stop.winfo_manager():
                 stop.pack_forget()
             return
-        progress.configure(progress_color=COLOR_ORANGE)
+        # A held clip is still playing as far as the row is concerned -
+        # its Stop button stays, and the bar keeps its place - but the
+        # colour says it is not moving.
+        progress.configure(progress_color=COLOR_TEXT_DIM if paused else COLOR_ORANGE)
         progress.set(fraction)
         if stop is not None and not stop.winfo_manager():
             stop.pack(side="left", padx=3, before=entry["before"])
+
+    def _bind_seek(self, progress, slot):
+        """Dragging a row's own progress bar moves the clip playing under
+        it. The bar is already there and already says where the clip is,
+        so it is the control rather than a second widget beside it."""
+        progress.configure(cursor="hand2")
+        progress.bind("<Button-1>", lambda e: self._seek_from_bar(slot, progress, e))
+        progress.bind("<B1-Motion>", lambda e: self._seek_from_bar(slot, progress, e))
+
+    def _seek_from_bar(self, slot, progress, event):
+        sound = slot["sound"]
+        if sound is None:
+            return
+        key = self._sound_key(sound)
+        if self.audio_engine.playback_progress(key) is None:
+            return  # nothing playing here: the bar is not a play button
+        width = max(1, progress.winfo_width())
+        fraction = min(1.0, max(0.0, event.x / width))
+        self.audio_engine.seek_key(key, fraction)
+        # Straight away rather than at the next poll, so the bar follows
+        # the pointer while it is being dragged.
+        progress.set(fraction)
 
     def _on_search(self, _event=None):
         text = self.search_entry.get().strip().lower()
@@ -443,11 +473,14 @@ class SoundListMixin:
         menu = lambda e: self._show_sound_menu(e, slot["idx"], from_tile=True)
         button.bind("<Button-3>", menu)
         button.bind("<Button-2>" if sys.platform == "darwin" else "<Control-Button-1>", menu)
+        # Taller than the 3px it used to draw: it is a control now, and
+        # three pixels is not something to catch with a pointer.
         progress = ctk.CTkProgressBar(
-            cell, height=3, corner_radius=0, fg_color=COLOR_SURFACE, progress_color=COLOR_SURFACE,
+            cell, height=6, corner_radius=0, fg_color=COLOR_SURFACE, progress_color=COLOR_SURFACE,
         )
         progress.set(0)
         progress.pack(fill="x", pady=(2, 0))
+        self._bind_seek(progress, slot)
         slot.update(cell=cell, button=button, progress=progress,
                     item=self.list_frame.attach(cell))
         return slot
@@ -561,11 +594,12 @@ class SoundListMixin:
         more.pack(side="left", padx=(3, 8))
 
         progress = ctk.CTkProgressBar(
-            outer, height=3, corner_radius=0,
+            outer, height=6, corner_radius=0,
             fg_color=COLOR_SURFACE, progress_color=COLOR_SURFACE,
         )
         progress.set(0)
         progress.pack(fill="x", padx=8, pady=(0, 4))
+        self._bind_seek(progress, slot)
         slot.update(
             outer=outer, checkbox=checkbox, label=label, meta=meta_label,
             volume=volume_slider, volume_label=volume_label, stop=stop,
@@ -743,6 +777,149 @@ class SoundListMixin:
         sound["volume"] = int(round(value))
         label.configure(text=f"{sound['volume']}%")
         self._save_config_soon()
+
+    def _build_transport(self, parent):
+        """Pause, step through the board and play it as a list.
+
+        Its own row above the rest: the controls row was already as wide
+        as the window, and these belong together anyway.
+        """
+        frame = ctk.CTkFrame(parent, fg_color=COLOR_BG)
+        frame.pack(side="bottom", fill="x", padx=2, pady=(GAP, 0))
+        flat = dict(fg_color=COLOR_ROW, hover_color=COLOR_ROW_HOVER, text_color=COLOR_TEXT,
+                    border_width=1, border_color=COLOR_BORDER)
+        self.pause_button = ctk.CTkButton(
+            frame, text=PAUSE_TEXT, width=90, command=self.toggle_pause, **flat)
+        self.pause_button.pack(side="left")
+        ctk.CTkButton(
+            frame, text="Previous", width=80, command=self.play_previous, **flat,
+        ).pack(side="left", padx=(8, 0))
+        ctk.CTkButton(
+            frame, text="Next", width=70, command=self.play_next, **flat,
+        ).pack(side="left", padx=(8, 0))
+        self.continuous_checkbox = ctk.CTkCheckBox(
+            frame, text="Continuous", command=self._on_toggle_continuous,
+            fg_color=COLOR_ORANGE, hover_color=COLOR_ORANGE_HOVER,
+            checkmark_color=COLOR_ON_ACCENT, text_color=COLOR_TEXT,
+        )
+        if self.config.get("continuous_play"):
+            self.continuous_checkbox.select()
+        self.continuous_checkbox.pack(side="left", padx=(12, 0))
+
+        # The keys sit on the right of the same row, in the order the
+        # buttons on the left are in.
+        self.prev_hotkey_button = ctk.CTkButton(
+            frame, text="", width=110, command=self.set_prev_hotkey, **flat)
+        self.next_hotkey_button = ctk.CTkButton(
+            frame, text="", width=110, command=self.set_next_hotkey, **flat)
+        self.pause_hotkey_button = ctk.CTkButton(
+            frame, text="", width=110, command=self.set_pause_hotkey, **flat)
+        for button in (self.prev_hotkey_button, self.next_hotkey_button,
+                       self.pause_hotkey_button):
+            button.pack(side="right", padx=(8, 0))
+        self._update_transport_hotkey_buttons()
+
+    def _on_toggle_continuous(self):
+        self.config["continuous_play"] = bool(self.continuous_checkbox.get())
+        save_config(self.config)
+
+    def _update_transport_hotkey_buttons(self):
+        for key, button, label in (
+            ("pause_hotkey", self.pause_hotkey_button, "Pause"),
+            ("next_hotkey", self.next_hotkey_button, "Next"),
+            ("prev_hotkey", self.prev_hotkey_button, "Previous"),
+        ):
+            hotkey = self.config.get(key)
+            button.configure(text=f"{label}: {hotkey}" if hotkey else f"{label} key")
+
+    def _set_transport_hotkey(self, key, title, owner):
+        hotkey = self._ask_hotkey(title, self.config.get(key), owner=owner)
+        if hotkey is None:
+            return
+        self.config[key] = hotkey or None
+        save_config(self.config)
+        self._update_transport_hotkey_buttons()
+        self._apply_hotkeys()
+
+    def set_pause_hotkey(self):
+        self._set_transport_hotkey("pause_hotkey", "Pause hotkey", "pause")
+
+    def set_next_hotkey(self):
+        self._set_transport_hotkey("next_hotkey", "Play next hotkey", "next")
+
+    def set_prev_hotkey(self):
+        self._set_transport_hotkey("prev_hotkey", "Play previous hotkey", "prev")
+
+    # -- transport --------------------------------------------------------
+
+    def toggle_pause(self):
+        """Hold everything that is playing, or let it go on. One button
+        for the lot: a board plays a clip or two at a time, and a pause
+        per row would be a control on every row for the rare case."""
+        paused = bool(self.audio_engine.paused_keys())
+        self.audio_engine.pause_all(not paused)
+        self._update_playing()
+
+    def _playable_order(self):
+        """The entries Next and Previous walk: this profile's, in board
+        order, skipping the ones that are switched off or whose file is
+        gone."""
+        return [i for i, sound in enumerate(self.sounds)
+                if sound.get("enabled", True)
+                and os.path.exists(resolve_sound_path(sound["path"]))]
+
+    def play_next(self, step=1, wrap=True):
+        """Play the entry after the one that played last. Returns whether
+        anything was played."""
+        order = self._playable_order()
+        if not order:
+            return False
+        current = self._transport_position(order)
+        if current is None:
+            index = order[0] if step > 0 else order[-1]
+        else:
+            position = current + step
+            if not wrap and not 0 <= position < len(order):
+                return False
+            index = order[position % len(order)]
+        # The one that was playing stops as this one starts, which is
+        # what next means; anything else the board is playing is left
+        # alone.
+        if self._transport_key is not None:
+            self.audio_engine.stop_key(self._transport_key)
+        self.play_sound(self.sounds[index])
+        return True
+
+    def play_previous(self):
+        return self.play_next(-1)
+
+    def _transport_position(self, order):
+        """Where the last played entry sits in `order`, or None when it
+        is not in it any more - deleted, switched off, or from another
+        profile."""
+        if self._transport_key is None:
+            return None
+        for position, index in enumerate(order):
+            if self._sound_key(self.sounds[index]) == self._transport_key:
+                return position
+        return None
+
+    def _on_clip_finished(self, key):
+        """The engine calling from the audio thread: hand it straight
+        over rather than touching Tk here."""
+        self.root.after(0, self._clip_finished, key)
+
+    def _clip_finished(self, key):
+        if not self.config.get("continuous_play"):
+            return
+        # Only the clip the list is walking moves it on. Anything else
+        # ending - a one-off pressed by hand, a hotkey - leaves the run
+        # where it was.
+        if key != self._transport_key:
+            return
+        # No wrap: running the list means playing it to the end, not
+        # round and round until someone stops it.
+        self.play_next(1, wrap=False)
 
     def _build_controls(self, parent):
         frame = ctk.CTkFrame(parent, fg_color=COLOR_BG)
@@ -1174,6 +1351,9 @@ class SoundListMixin:
 
     def play_sound(self, sound):
         key = self._sound_key(sound)
+        # Where Next and Previous carry on from, whatever started this
+        # one: a click, a hotkey, or the list running itself.
+        self._transport_key = key
         # The key is the entry, not the file that happens to come up, so
         # stopping, looping and the playing indicator keep working for a
         # group whichever member is playing.

@@ -178,6 +178,13 @@ def prepare_config(config):
     config.setdefault("mic_effect_amount", 70)
     config.setdefault("ptt_hotkey", None)
     config.setdefault("sound_view", "list")
+    # Transport: playing the board as a list rather than one clip at a
+    # time, and the keys that drive it. Off and unset, so a board that
+    # predates them behaves exactly as it did.
+    config.setdefault("continuous_play", False)
+    config.setdefault("pause_hotkey", None)
+    config.setdefault("next_hotkey", None)
+    config.setdefault("prev_hotkey", None)
     config.setdefault("close_to_tray", False)
     config.setdefault("check_for_updates", True)
     # "system", "light" or "dark"; "system" follows the OS on

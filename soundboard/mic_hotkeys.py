@@ -346,6 +346,9 @@ class MicHotkeyMixin:
             ("mute", "Mute mic", self.config.get("mute_hotkey")),
             ("ptt", "Push to talk", self.config.get("ptt_hotkey")),
             ("replay", f"Save last {REPLAY_S}s", self.config.get("replay_hotkey")),
+            ("pause", "Pause", self.config.get("pause_hotkey")),
+            ("next", "Play next", self.config.get("next_hotkey")),
+            ("prev", "Play previous", self.config.get("prev_hotkey")),
         ]
         candidates += [(s, f"'{s['name']}'", s.get("hotkey")) for s in self.sounds]
         for obj, label, other in candidates:
@@ -373,6 +376,15 @@ class MicHotkeyMixin:
         stop_hotkey = self.config.get("stop_hotkey")
         if stop_hotkey and is_valid_hotkey(stop_hotkey):
             mapping[stop_hotkey] = self.audio_engine.stop_all
+        pause_hotkey = self.config.get("pause_hotkey")
+        if pause_hotkey and is_valid_hotkey(pause_hotkey):
+            mapping[pause_hotkey] = self.toggle_pause
+        next_hotkey = self.config.get("next_hotkey")
+        if next_hotkey and is_valid_hotkey(next_hotkey):
+            mapping[next_hotkey] = self.play_next
+        prev_hotkey = self.config.get("prev_hotkey")
+        if prev_hotkey and is_valid_hotkey(prev_hotkey):
+            mapping[prev_hotkey] = self.play_previous
         mute_hotkey = self.config.get("mute_hotkey")
         if mute_hotkey and is_valid_hotkey(mute_hotkey):
             mapping[mute_hotkey] = self._toggle_mute_from_hotkey

@@ -122,6 +122,18 @@ virtual audio cable.
   switch wants and what config "stop_fade_on" being off gives everyone:
   the engine's stop_fade_s is 0 until the setting is switched on, so a
   board that predates this cuts exactly as it always did
+- Transport: pause is a flag on _ActiveSound - the clip stays in the mix
+  and read() returns silence without advancing, so resuming costs
+  nothing and a paused clip is not "playing" for the ducker. seek()
+  moves position and ramps back up over SEEK_RAMP_FRAMES, because
+  landing in the middle of a waveform is a click. A clip that ends by
+  itself is reported through AudioEngine.on_finished, collected during
+  the mix and fired by _report_ends() once the lock is released, and
+  only from the output stream unless there is none - both lists hold the
+  same clip. sound_list drives all of it: the row's own progress bar is
+  the seek control (a click is ignored unless that row is playing),
+  _transport_key is what Next and Previous step from, and continuous
+  play walks the profile without wrapping, so a run ends at the end
 - Ducking: _Ducker in audio_engine.py drops the mic while anything is in
   _active_sounds, applied in _on_output only - the monitor callback
   carries clips alone, so what reaches the cable ducks and what you hear
