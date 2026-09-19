@@ -146,6 +146,17 @@ def load_config():
             or not isinstance(config.get("profiles", []), list)
         ):
             raise ValueError("config has an unexpected structure")
+    return prepare_config(config)
+
+
+def prepare_config(config):
+    """Fill in what a config leaves out and tidy what it has.
+
+    Split out of load_config so that a backup being restored goes
+    through exactly what the live file does - defaults, the migration
+    out of the old flat sound list, and the per-sound cleaning - rather
+    than a second, nearly-identical reader that drifts from this one.
+    """
     if "device" in config and "output_device" not in config:
         config["output_device"] = config.pop("device")
     config.setdefault("output_device", None)

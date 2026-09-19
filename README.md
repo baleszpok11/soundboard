@@ -19,7 +19,11 @@ together, from one virtual microphone.
 - Profiles: keep separate boards for different games or groups and switch
   between them, each with its own sounds and hotkeys
 - **Import / Export** tab: share a board as a small file of links, not
-  audio - whoever opens it downloads their own copy of each clip
+  audio - whoever opens it downloads their own copy of each clip - or as
+  a bundle that carries the clips, for a board of recordings and edits
+  that has no links behind it
+- Automatic daily backups of your board, and a restore button, so a
+  profile deleted by accident can be brought back
 - Mixes your real microphone with soundboard clips in real time, so
   people hear both at once — no separate mixer app needed
 - Choose which microphone (input) and which virtual cable (output) are used
@@ -367,22 +371,46 @@ button on the Soundboard tab, so the board itself keeps the window.
 
 ### Sharing a board
 
-The **Import / Export** tab shares a board without moving any audio. An
-export lists each sound's name, hotkey, volume and the link it was
-downloaded from; whoever imports it downloads their own copy from those
-links. The file is a few kilobytes, and nothing is redistributed.
+The **Import / Export** tab moves a board between machines, in one of two
+files.
 
-- **Export:** choose the active profile or all of them. The summary says
-  how many sounds can be shared and names the ones that can't - anything
-  added from disk, or saved by the Sound Editor, has no link to rebuild
-  it from and is left out.
+A **board file** (`.sbboard`) is links. It lists each sound's name,
+hotkey, volume and the link it was downloaded from, and whoever imports
+it downloads their own copy from those links. The file is a few
+kilobytes and nothing is redistributed.
+
+A **bundle** (`.sbpack`) carries the audio as well: the list plus every
+clip it plays, zipped. It is as big as the board, and it is the only way
+to move clips that were recorded, edited or added from disk, because
+those have no link to rebuild them from.
+
+- **Export:** choose links only or with audio, then the active profile or
+  all of them. The summary says what would travel - for links, how many
+  sounds can be shared and which can't; for a bundle, how many clips and
+  roughly how large the file will be.
 - **Import:** pick a file and the links it contains are listed *before*
   anything is downloaded, so you can see what a file someone sent you
   would fetch. Choose whether it lands in a new profile or the one
   you're on, then Import. Each clip is downloaded in turn and can be
   cancelled; if a video has been taken down, that one is reported and
   the rest still import. A hotkey already used in the destination
-  profile is dropped rather than shadowing the sound that has it.
+  profile is dropped rather than shadowing the sound that has it. A
+  bundle is recognised by what the file is rather than what it is
+  called: its clips are listed the same way, then unpacked into your
+  `Sounds/` folder under names of Soundboard's choosing, so nothing in
+  a file someone sent you can write outside that folder.
+
+### Backups
+
+Soundboard copies `soundboard_config.json` into a `Backups/` folder
+beside it once a day, and keeps the last seven. The **Backups** section
+of the Import / Export tab lists them, takes one on demand, and restores
+one.
+
+Restoring brings back the profiles and sounds that backup held. Your
+devices and other settings are left as they are, no audio file is
+touched, and the board as it is now is backed up first - so restoring
+the wrong day is itself undoable.
 
 ### Where your data is stored
 

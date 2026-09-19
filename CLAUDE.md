@@ -163,7 +163,25 @@ virtual audio cable.
   to soundboard_error.log; config writes are atomic
 - Sharing: board_file.py reads/writes .sbboard files (links, not audio);
   only sounds with a "source" can travel. downloader.fetch_clip() is the
-  one download path, used by both the Download tab and import
+  one download path, used by both the Download tab and import.
+  bundle.py is the other format, .sbpack: a zip of the list plus the
+  audio, which is the only way to move a clip that was recorded or
+  edited and has no link behind it. The two stay separate on purpose -
+  a .sbboard never contains audio. A bundle is a file from someone
+  else, so nothing in it reaches the filesystem by its own name: a
+  member is read by the name the manifest gives and written under its
+  basename into Sounds/, and read() refuses a clip or a total past the
+  caps in bundle.py
+- Backups: backups.py copies the config into Backups/ beside it, once a
+  day at startup (backup_daily) and on demand, keeping KEEP of them.
+  Restoring lives in share_tab because it is the one thing here that can
+  empty a board: it confirms first, backs the current board up, and then
+  replaces only profiles/active_profile, leaving devices and the rest of
+  the settings alone - the settings widgets were built from the old
+  values and would write them back. read_backup() goes through
+  config.prepare_config(), which is load_config()'s own reader split out
+  so a restored file gets the same defaults and migrations as a loaded
+  one
 - Bug reports: the dialog offers "Report bug"; reports go to the relay in
   relay/ (REPORT_URL in bug_report.py), falling back to a prefilled issue
   URL. Never put a GitHub token in the app - it can be extracted
