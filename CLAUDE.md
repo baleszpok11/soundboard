@@ -190,9 +190,26 @@ virtual audio cable.
   the rows on screen are in _playing_widgets, and mac_scroll.bind_canvas()
   gives the canvas the trackpad gesture CTkScrollableFrame gets patched
   for; _scroll_pixels reads the scroll region rather than bbox("all"),
-  which on a virtualised list is only a screenful
+  which on a virtualised list is only a screenful. The wheel is bound
+  with bind_all and filtered by _inside(), not bound to the canvas: a Tk
+  binding fires only for the widget the event reaches and does not walk
+  up the tree, so a canvas-only binding answers the gaps between rows on
+  X11 and macOS and nothing at all on Windows, where <MouseWheel> goes
+  to the focused widget. It binds once and never unbinds, because
+  unbind_all would take CustomTkinter's own bindings with it, and it
+  goes through the raw canvas since CTk refuses bind_all on its widgets.
+  Windows counts the wheel in multiples of 120
 - Errors: Tk callback errors and startup failures show a dialog and append
   to soundboard_error.log; config writes are atomic
+- Local playback: play_data(local_only=True) queues a clip to the monitor
+  alone, which is what the editor's Preview uses - without it everyone in
+  the call hears every pass over the same four seconds. With no monitor
+  stream it falls back to the output, because that case is exactly "the
+  output device is the system default", so it is the local device
+  anyway. A local clip ignores monitor_muted: that setting keeps the
+  board out of your headphones, and pressing Preview is asking to hear
+  this one. The Test tone and the Speak tab are meant to reach the
+  cable and still do
 - Sharing: board_file.py reads/writes .sbboard files (links, not audio);
   only sounds with a "source" can travel. downloader.fetch_clip() is the
   one download path, used by both the Download tab and import.

@@ -1134,23 +1134,39 @@ class AudioEngine:
             return np.zeros((0, self.input_channels), dtype=np.float32)
         return np.concatenate(parts)
 
-    def play_data(self, data, samplerate, key=None, gain=1.0, loop=False, fades=NO_FADES):
+    def play_data(self, data, samplerate, key=None, gain=1.0, loop=False, fades=NO_FADES,
+                  local_only=False):
         """Queue audio for playback. A clip with the same key that is
-        still playing is stopped first, so re-triggering restarts it."""
+        still playing is stopped first, so re-triggering restarts it.
+
+        `local_only` keeps it off the virtual cable: it is for listening
+        to your own work - the editor's preview - rather than for
+        playing something to a call.
+        """
         if self.output_stream is None and self.monitor_stream is None:
             raise RuntimeError("No output device selected.")
-        self._queue_clip(_resample(data, samplerate, SAMPLE_RATE), key, gain, loop, fades)
+        self._queue_clip(_resample(data, samplerate, SAMPLE_RATE), key, gain, loop, fades,
+                         local_only=local_only)
 
-    def _queue_clip(self, resampled, key, gain, loop=False, fades=NO_FADES):
+    def _queue_clip(self, resampled, key, gain, loop=False, fades=NO_FADES, local_only=False):
         main_data = _match_channels(resampled, self.output_channels)
         monitor_data = _match_channels(resampled, self.monitor_channels)
         with self._lock:
             if key is not None:
                 self._active_sounds = [s for s in self._active_sounds if s.key != key]
                 self._active_sounds_monitor = [s for s in self._active_sounds_monitor if s.key != key]
-            if self.output_stream is not None:
+            # A local clip goes to the monitor, which is the system's own
+            # output device. With no monitor stream there is no separate
+            # one to go to - that happens exactly when the output device
+            # already is the system default, so it is the local device
+            # too and playing it there is still not down a cable.
+            monitor_only = local_only and self.monitor_stream is not None
+            if self.output_stream is not None and not monitor_only:
                 self._active_sounds.append(_ActiveSound(main_data, key, gain, loop, fades))
-            if self.monitor_stream is not None and not self.monitor_muted:
+            if self.monitor_stream is not None and (local_only or not self.monitor_muted):
+                # A muted monitor means "keep the board out of my
+                # headphones"; pressing Preview is asking to hear this
+                # one now, so it is played anyway.
                 self._active_sounds_monitor.append(_ActiveSound(monitor_data, key, gain, loop, fades))
 
     def play(self, path, gain=1.0, loop=False, key=None, fades=NO_FADES):
