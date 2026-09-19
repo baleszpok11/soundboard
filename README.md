@@ -29,6 +29,8 @@ together, from one virtual microphone.
   profile deleted by accident can be brought back
 - Mixes your real microphone with soundboard clips in real time, so
   people hear both at once — no separate mixer app needed
+- Mic processing: a noise gate to drop the room between words, a rumble
+  cut that's on by default, and a live pitch shift for your own voice
 - Choose which microphone (input) and which virtual cable (output) are used
 - Level meters under both device pickers, plus a "Test" button that sends
   a tone to the output, so you can see your routing works without asking

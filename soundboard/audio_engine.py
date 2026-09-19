@@ -64,7 +64,26 @@ DUCK_MUTE_DB = 40  # the top of the control is a real mute, not 40 dB down
 STREAM_TIMEOUT_S = 2.0  # a running stream with no callbacks for this long is treated as lost
 # Live mic effects. Only what can be done a block at a time belongs here;
 # anything that needs the whole clip stays in dsp.py and the editor.
-MIC_EFFECTS = ("none", "telephone", "robot", "drive")
+MIC_EFFECTS = ("none", "telephone", "robot", "drive", "pitch")
+# Pitch: the slider's 0 to 1 spans this either way, with the middle at no
+# shift, so one control does up and down.
+MIC_PITCH_SEMITONES = 12.0
+# The shifter's grain. Long enough that a voice keeps its body, short
+# enough that the delay it adds is not something to talk over: a tap is
+# read up to this far behind the input.
+MIC_PITCH_WINDOW_S = 0.045
+# Rumble, handling noise and the bottom of a desk fan, none of which a
+# voice needs. Second order: enough to take it out, gentle enough that
+# nothing above it is coloured.
+MIC_HIGHPASS_HZ = 80.0
+MIC_HIGHPASS_ORDER = 2
+# The gate. Peak-based detection, because the start of a word has to open
+# it: an RMS over a block is already late. Held open after the last peak
+# so a word's tail is not cut, then let down over the release.
+GATE_MIN_DB, GATE_MAX_DB = -70, -20
+GATE_ATTACK_S = 0.005
+GATE_HOLD_S = 0.12
+GATE_RELEASE_S = 0.25
 MIC_PHONE_BAND_HZ = (300.0, 3000.0)
 # An integer number of cycles per second, so wrapping the oscillator at
 # one second leaves the sine continuous.
@@ -77,6 +96,13 @@ TEST_TONE_S = 0.8
 TEST_TONE_HZ = 440.0
 TEST_TONE_LEVEL = 0.4
 TEST_TONE_FADE_S = 0.05
+
+
+def pitch_semitones(amount):
+    """The mic effect slider as semitones: the middle is no shift, each
+    end is MIC_PITCH_SEMITONES away from it. One control covers both
+    directions, which is what the picker's single slider can offer."""
+    return (min(1.0, max(0.0, amount)) * 2.0 - 1.0) * MIC_PITCH_SEMITONES
 
 
 def duck_depth(amount_db):
@@ -347,6 +373,155 @@ class _Ducker:
         return block
 
 
+class _MicCleanup:
+    """What the microphone gets before any effect: a high-pass to drop
+    rumble, and a gate to drop the room between words.
+
+    Both are block-sized and keep their state across blocks, like the
+    ducker and the limiter. The gain is ramped from the last block's
+    value rather than stepped, so opening and closing the gate has
+    nothing to click.
+    """
+
+    def __init__(self):
+        self.gate_on = False
+        self.threshold_db = -45.0
+        self.highpass_on = True
+        self._gain = 1.0
+        self._hold_left = 0.0
+        self._sos = None
+        self._zi = None
+        self._channels = 0
+
+    def set(self, gate_on, threshold_db, highpass_on):
+        """Caller holds the engine lock."""
+        self.gate_on = bool(gate_on)
+        self.threshold_db = float(threshold_db)
+        self.highpass_on = bool(highpass_on)
+
+    def process(self, block):
+        if len(block):
+            block = self._highpass(block)
+            block = self._gate(block)
+        return block
+
+    def _highpass(self, block):
+        if not self.highpass_on:
+            return block
+        # Without blocking for it: scipy is fetched in the background at
+        # startup, and the first blocks after launch go through unfiltered
+        # rather than making the callback wait half a second for it.
+        sig = _scipy_signal
+        if sig is None:
+            return block
+        channels = block.shape[1]
+        if self._sos is None or channels != self._channels:
+            self._sos = sig.butter(MIC_HIGHPASS_ORDER, MIC_HIGHPASS_HZ,
+                                   btype="high", fs=SAMPLE_RATE, output="sos")
+            self._channels = channels
+            # Settled on the first sample, so the filter does not thump
+            # while it fills.
+            self._zi = (sig.sosfilt_zi(self._sos)[:, :, None] * block[0]).astype(np.float32)
+        out = np.empty_like(block)
+        for ch in range(channels):
+            out[:, ch], self._zi[:, :, ch] = sig.sosfilt(
+                self._sos, block[:, ch], zi=self._zi[:, :, ch])
+        return out
+
+    def _gate(self, block):
+        if not self.gate_on:
+            self._gain = 1.0
+            self._hold_left = 0.0
+            return block
+        frames = len(block)
+        seconds = frames / SAMPLE_RATE
+        peak = float(np.abs(block).max())
+        above = peak > 10 ** (self.threshold_db / 20)
+        if above:
+            self._hold_left = GATE_HOLD_S
+        else:
+            self._hold_left = max(0.0, self._hold_left - seconds)
+        target = 1.0 if above or self._hold_left > 0 else 0.0
+        # Open fast enough for the front of a word, close slowly enough
+        # that the tail of one is not chopped off. The gain moves at a
+        # fixed rate rather than by a fraction of what is left, so the
+        # attack and release times above are how long it actually takes -
+        # and closing reaches silence rather than creeping towards it.
+        step = seconds / (GATE_ATTACK_S if target > self._gain else GATE_RELEASE_S)
+        if target > self._gain:
+            gain = min(target, self._gain + step)
+        else:
+            gain = max(target, self._gain - step)
+        if gain == self._gain:
+            block = block * gain if gain != 1.0 else block
+        else:
+            block = block * np.linspace(self._gain, gain, frames, dtype=np.float32)[:, None]
+            self._gain = gain
+        return block.astype(np.float32)
+
+
+class _PitchShifter:
+    """A live pitch shift: two taps into a ring of recent input, read at
+    the shifted rate and crossfaded where they wrap.
+
+    Not the phase vocoder dsp.py uses. That works on a whole clip and
+    takes as long as it takes; this has to hand back a block before the
+    card asks for the next one, which rules it out. Two taps half a
+    window apart, with an equal-power crossfade, is the cheap shifter
+    that has been in hardware since the eighties: a few numpy operations
+    per block, and the sound of it is a voice, which is what it is for.
+    """
+
+    def __init__(self, semitones=0.0):
+        self.semitones = semitones
+        self._window = max(2, int(MIC_PITCH_WINDOW_S * SAMPLE_RATE))
+        self._history = None
+        self._phase = 0.0
+        # The ring starts empty, so a tap crossing the end of the silence
+        # would step straight into the signal. The fade goes on the way
+        # in rather than on the way out: what is stored rises from
+        # nothing, so wherever a tap reads there is no edge to hit.
+        self._filling = self._window
+
+    def process(self, block):
+        frames, channels = block.shape
+        if not frames:
+            return block
+        rate = 2.0 ** (self.semitones / 12.0)
+        if self._history is None or self._history.shape[1] != channels:
+            self._history = np.zeros((self._window + frames, channels), dtype=np.float32)
+            self._filling = self._window
+        if self._filling > 0:
+            filled = min(frames, self._filling)
+            done = (self._window - self._filling) + np.arange(filled, dtype=np.float32)
+            block = block.copy()
+            block[:filled] *= np.clip(done / self._window, 0.0, 1.0)[:, None]
+            self._filling -= filled
+        history = np.vstack([self._history, block])[-(self._window + frames):]
+        self._history = history
+
+        # Where each tap reads, as a delay that walks the window and
+        # wraps: the wrap is the seam the second tap covers.
+        t = np.arange(frames, dtype=np.float64)
+        u = np.mod(self._phase + (1.0 - rate) * t / self._window, 1.0)
+        self._phase = float(np.mod(self._phase + (1.0 - rate) * frames / self._window, 1.0))
+        newest = len(history) - frames  # index in history of this block's first frame
+        a = newest + t - u * self._window
+        b = newest + t - np.mod(u + 0.5, 1.0) * self._window
+        # The two gains sum to one rather than holding equal power: both
+        # taps are reading the same voice a moment apart, so an
+        # equal-power pair sums 3 dB hot instead of holding the level.
+        gain_a = np.square(np.sin(np.pi * u)).astype(np.float32)
+        gain_b = (1.0 - gain_a).astype(np.float32)
+        index = np.arange(len(history), dtype=np.float64)
+        out = np.empty_like(block)
+        for ch in range(channels):
+            column = history[:, ch]
+            out[:, ch] = (np.interp(a, index, column) * gain_a
+                          + np.interp(b, index, column) * gain_b)
+        return out
+
+
 class _MicEffectChain:
     """The live mic effects, applied a block at a time inside the output
     callback. Filter state and the oscillator's phase carry over between
@@ -363,6 +538,7 @@ class _MicEffectChain:
         self._sos = None
         self._channels = 0
         self._phase = 0
+        self._pitch = None
 
     def set(self, name, amount):
         """Caller holds the engine lock, so the callback never sees half
@@ -378,6 +554,10 @@ class _MicEffectChain:
         if self.idle:
             return block
         target = 0.0 if self.name == "none" else self.amount
+        if self.name == "pitch":
+            # The slider is semitones here, not a wet mix: half a shifted
+            # voice under the unshifted one is two people talking.
+            target = 1.0
         if self.name != self._active:
             target = 0.0  # fade the old one out before swapping
         wet = self._wet(block) if self._active != "none" else block
@@ -396,6 +576,7 @@ class _MicEffectChain:
         self._zi = None
         self._sos = None
         self._phase = 0
+        self._pitch = None
 
     def _wet(self, block):
         if self._active == "telephone":
@@ -404,7 +585,15 @@ class _MicEffectChain:
             return self._robot(block)
         if self._active == "drive":
             return np.tanh(block * 10 ** (MIC_DRIVE_DB / 20)).astype(np.float32)
+        if self._active == "pitch":
+            return self._pitch_shift(block)
         return block
+
+    def _pitch_shift(self, block):
+        if self._pitch is None:
+            self._pitch = _PitchShifter()
+        self._pitch.semitones = pitch_semitones(self.amount)
+        return self._pitch.process(block)
 
     def _telephone(self, block):
         channels = block.shape[1]
@@ -478,6 +667,7 @@ class AudioEngine:
         # board does until the setting is switched on.
         self.stop_fade_s = 0.0
         self.mic_effects = _MicEffectChain()
+        self.mic_cleanup = _MicCleanup()
         self._ducker = _Ducker()
         self._output_limiter = _Limiter()
         self._monitor_limiter = _Limiter()
@@ -706,6 +896,12 @@ class AudioEngine:
                     return min(1.0, sound.position / len(sound.data))
         return None
 
+    def set_mic_cleanup(self, gate_on, threshold_db, highpass_on):
+        """Change the gate and the high-pass. Takes the lock so the
+        callback never reads half a change."""
+        with self._lock:
+            self.mic_cleanup.set(gate_on, threshold_db, highpass_on)
+
     def set_mic_effect(self, name, amount):
         """Change the live mic effect. Takes the lock so the callback
         never reads a half-applied change."""
@@ -822,6 +1018,9 @@ class AudioEngine:
             if status:
                 self.dropouts += 1
             mixed = self._pull_mic_frames(frames, self.output_channels)
+            # Clean first, then colour: gating what an effect has already
+            # shaped means gating the effect's own tail.
+            mixed = self.mic_cleanup.process(mixed)
             mixed = self.mic_effects.process(mixed)
             # Ramp gain changes over the block so muting doesn't click.
             target = self.mic_gain if self.mic_enabled else 0.0

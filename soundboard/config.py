@@ -175,6 +175,13 @@ def prepare_config(config):
     config.setdefault("tts_voice", None)
     config.setdefault("tts_rate", None)
     config.setdefault("mic_effect", "none")
+    # Mic cleanup. The gate is off by default - one set too high eats the
+    # start of words, and that is not a surprise to hand anyone. The
+    # high-pass is on: below its corner there is nothing a voice needs,
+    # and a desk knock or a fan is what is there instead.
+    config.setdefault("noise_gate", False)
+    config.setdefault("gate_threshold", -45)
+    config.setdefault("mic_highpass", True)
     config.setdefault("mic_effect_amount", 70)
     config.setdefault("ptt_hotkey", None)
     config.setdefault("sound_view", "list")
