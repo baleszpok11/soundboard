@@ -134,6 +134,26 @@ virtual audio cable.
   the seek control (a click is ignored unless that row is playing),
   _transport_key is what Next and Previous step from, and continuous
   play walks the profile without wrapping, so a run ends at the end
+- Mic cleanup: _MicCleanup runs before the effect chain in _on_output -
+  clean first, then colour, or the gate chews the effect's own tail. The
+  high-pass is second order at 80 Hz (rumble 17 dB down at 30, a low
+  voice's fundamental barely touched) and is the one thing here that is
+  on by default; it reads _scipy_signal directly and passes audio
+  through untouched while that is still None, so the first blocks after
+  launch never wait half a second inside the callback for an import. The
+  gate detects on the block's peak, not its RMS, because the front of a
+  word has to open it, holds after the last peak and then moves the gain
+  at a fixed rate, so GATE_RELEASE_S is how long closing takes and it
+  reaches silence rather than creeping at it
+- Live pitch: _PitchShifter is two taps into a ring of recent input,
+  read at the shifted rate and crossfaded where they wrap - not dsp.py's
+  phase vocoder, which works on a whole clip and cannot fill a block in
+  time. The two gains sum to one rather than holding equal power: both
+  taps read the same voice a moment apart, so an equal-power pair sums
+  3 dB hot. The ring starts silent, and what goes into it is faded over
+  the first window, so no tap ever crosses an edge. It is the one effect
+  whose slider is not a wet mix - pitch_semitones() maps it to semitones
+  either side of no shift, and the label says st instead of %
 - Ducking: _Ducker in audio_engine.py drops the mic while anything is in
   _active_sounds, applied in _on_output only - the monitor callback
   carries clips alone, so what reaches the cable ducks and what you hear

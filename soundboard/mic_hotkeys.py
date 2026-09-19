@@ -5,7 +5,16 @@ import subprocess
 
 import customtkinter as ctk
 
-from .audio_engine import DUCK_MIN_DB, DUCK_MUTE_DB, MIC_EFFECTS, REPLAY_S, duck_depth
+from .audio_engine import (
+    DUCK_MIN_DB,
+    DUCK_MUTE_DB,
+    GATE_MAX_DB,
+    GATE_MIN_DB,
+    MIC_EFFECTS,
+    REPLAY_S,
+    duck_depth,
+    pitch_semitones,
+)
 from .config import save_config
 from .dialogs import HotkeyDialog, ask_yes_no, error, warn
 from .hotkeys import (
@@ -88,6 +97,7 @@ class MicHotkeyMixin:
             font=font("small"), text_color=COLOR_TEXT_DIM,
         )
         self.mic_effect_label.pack(side="left")
+        self._update_mic_effect_label()
         duck = ctk.CTkFrame(box, fg_color="transparent")
         duck.grid(row=4, column=0, columnspan=2, sticky="w", pady=(6, 0))
         self.duck_checkbox = ctk.CTkCheckBox(
@@ -105,8 +115,31 @@ class MicHotkeyMixin:
         self.duck_label = ctk.CTkLabel(
             duck, text="", width=52, font=font("small"), text_color=COLOR_TEXT_DIM)
         self.duck_label.pack(side="left")
+        clean = ctk.CTkFrame(box, fg_color="transparent")
+        clean.grid(row=5, column=0, columnspan=2, sticky="w", pady=(6, 0))
+        self.gate_checkbox = ctk.CTkCheckBox(
+            clean, text="Noise gate", command=self._on_toggle_gate, **checkbox)
+        if self.config.get("noise_gate"):
+            self.gate_checkbox.select()
+        self.gate_checkbox.pack(side="left")
+        self.gate_slider = ctk.CTkSlider(
+            clean, from_=GATE_MIN_DB, to=GATE_MAX_DB, width=120,
+            number_of_steps=GATE_MAX_DB - GATE_MIN_DB,
+            command=self._on_gate_threshold,
+        )
+        self.gate_slider.set(self.config.get("gate_threshold", -45))
+        self.gate_slider.pack(side="left", padx=(8, 0))
+        self.gate_label = ctk.CTkLabel(
+            clean, text="", width=52, font=font("small"), text_color=COLOR_TEXT_DIM)
+        self.gate_label.pack(side="left")
+        self.highpass_checkbox = ctk.CTkCheckBox(
+            clean, text="Cut rumble", command=self._on_toggle_highpass, **checkbox)
+        if self.config.get("mic_highpass", True):
+            self.highpass_checkbox.select()
+        self.highpass_checkbox.pack(side="left", padx=(12, 0))
+
         self.mic_status = ctk.CTkLabel(box, text="", text_color=COLOR_TEXT_DIM, anchor="w")
-        self.mic_status.grid(row=5, column=0, columnspan=2, sticky="w", pady=(4, 0))
+        self.mic_status.grid(row=6, column=0, columnspan=2, sticky="w", pady=(4, 0))
         if self.config["mic_muted"]:
             self.mute_checkbox.select()
         if self.config["push_to_talk"]:
@@ -115,6 +148,7 @@ class MicHotkeyMixin:
         self._update_mic_hotkey_buttons()
         self._update_mic_state()
         self._apply_mic_effect()
+        self._apply_mic_cleanup()
         self._apply_replay_setting()
         self._apply_duck()
 
@@ -125,13 +159,24 @@ class MicHotkeyMixin:
     def _on_mic_effect_change(self, label):
         self.config["mic_effect"] = label.lower()
         save_config(self.config)
+        self._update_mic_effect_label()
         self._apply_mic_effect()
 
     def _on_mic_effect_amount(self, value):
         self.config["mic_effect_amount"] = int(round(value))
-        self.mic_effect_label.configure(text=f"{self.config['mic_effect_amount']}%")
+        self._update_mic_effect_label()
         self._apply_mic_effect()
         self._save_config_soon()
+
+    def _update_mic_effect_label(self):
+        """The slider means something different for pitch: semitones
+        either way from no shift, rather than how much of the effect."""
+        amount = self.config["mic_effect_amount"]
+        if self.config.get("mic_effect") == "pitch":
+            semitones = pitch_semitones(amount / 100)
+            self.mic_effect_label.configure(text=f"{semitones:+.0f}st")
+        else:
+            self.mic_effect_label.configure(text=f"{amount}%")
 
     def _apply_mic_effect(self):
         """What the effect does reaches the output device, which is what
@@ -139,6 +184,31 @@ class MicHotkeyMixin:
         the mic, so there is nothing to change there."""
         self.audio_engine.set_mic_effect(
             self.config["mic_effect"], self.config["mic_effect_amount"] / 100,
+        )
+
+    def _on_toggle_gate(self):
+        self.config["noise_gate"] = bool(self.gate_checkbox.get())
+        save_config(self.config)
+        self._apply_mic_cleanup()
+
+    def _on_gate_threshold(self, value):
+        self.config["gate_threshold"] = int(round(value))
+        self._apply_mic_cleanup()
+        self._save_config_soon()
+
+    def _on_toggle_highpass(self):
+        self.config["mic_highpass"] = bool(self.highpass_checkbox.get())
+        save_config(self.config)
+        self._apply_mic_cleanup()
+
+    def _apply_mic_cleanup(self):
+        """The gate and the high-pass, which sit in front of the effect
+        and reach the output device the same way it does."""
+        threshold = self.config.get("gate_threshold", -45)
+        self.gate_label.configure(text=f"{threshold} dB")
+        self.audio_engine.set_mic_cleanup(
+            self.config.get("noise_gate", False), threshold,
+            self.config.get("mic_highpass", True),
         )
 
     def _on_toggle_duck(self):
