@@ -177,16 +177,19 @@ class Soundboard(DeviceMixin, MicHotkeyMixin, SoundListMixin, DownloadMixin, Edi
         self.tabview.configure(command=self._place_settings_panel)
 
         self._build_settings(board_tab)
-        # Holder stays packed so the warning can appear above the sound list.
+        # Holder stays packed so the warning can appear above the sound
+        # list, and it is what the settings panel opens above.
         warning_holder = tk.Frame(board_tab, height=1)
         register_tk(warning_holder, bg=COLOR_BG)
         warning_holder.pack(fill="x")
+        self.warning_holder = warning_holder
         self.loop_warning = wrap_to_width(ctk.CTkLabel(
             warning_holder, text="", text_color=COLOR_ERROR_TEXT,
             justify="left", anchor="w",
         ))
         self._build_cable_warning(warning_holder)
         self._build_permission_warning(warning_holder)
+        self._place_settings_panel()
         # The controls are packed before the list although they sit below
         # it: the list is the expanding child, and whatever is packed after
         # it gets whatever is left of the cavity, which was nothing. Pack
@@ -233,13 +236,9 @@ class Soundboard(DeviceMixin, MicHotkeyMixin, SoundListMixin, DownloadMixin, Edi
             text_color=COLOR_TEXT, border_width=1, border_color=COLOR_BORDER,
         )
         self.settings_button.pack(fill="x", padx=2, pady=(2, 0))
-        # An empty holder, packed now, so the panel opens between the
-        # button and the sound list however late it is first shown.
-        self.settings_holder = tk.Frame(board_tab, height=0)
-        register_tk(self.settings_holder, bg=COLOR_BG)
-        self.settings_holder.pack(fill="x")
         self.settings_panel = self._build_device_selectors(self.root)
-        self._place_settings_panel()
+        # Not placed here: the panel opens above the warning holder, which
+        # the caller packs next.
 
     def _toggle_settings(self):
         self.settings_open = not self.settings_open
@@ -259,7 +258,12 @@ class Soundboard(DeviceMixin, MicHotkeyMixin, SoundListMixin, DownloadMixin, Edi
         if on_settings_tab:
             panel.pack(in_=self.settings_tab, fill="x", padx=2, pady=(2, GAP))
         elif self.settings_open:
-            panel.pack(in_=self.settings_holder, fill="x", padx=2, pady=(2, GAP))
+            # Packed before the warning holder rather than inside a spare
+            # frame of its own: Tk keeps a pack master's requested size
+            # after its last slave leaves, so an empty holder would stay
+            # as tall as the panel and push the board down the window.
+            panel.pack(before=self.warning_holder, fill="x", padx=2,
+                       pady=(2, GAP))
 
     def _build_appearance_controls(self, frame, row):
         """Light/dark, or follow the OS. "System" is the default and is
