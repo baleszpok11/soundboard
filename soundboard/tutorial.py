@@ -87,6 +87,12 @@ _FEEDBACK = (
     "a red warning when it spots either problem itself."
 )
 
+_WHERE = (
+    "The settings have two homes and it is the same panel in both: a "
+    "Settings tab of its own, and a Settings button at the top of the "
+    "Soundboard tab that opens it in place."
+)
+
 PAGES = {
     WINDOWS: [
         ("text", _WHY),
@@ -101,6 +107,7 @@ PAGES = {
          "Open the Settings tab, or the Settings button on the Soundboard "
          "tab, and set Microphone to your real microphone and Virtual mic "
          "output to CABLE Input. " + _BOTH_ENDS),
+        ("shot", "settings-windows", _WHERE),
         ("shot", "devices-windows", "What the two dropdowns should say."),
         ("step", "Check it before you go live", _CHECK),
         ("shot", "test-windows", "The output meter moves while the tone plays."),
@@ -125,6 +132,7 @@ PAGES = {
          "Open the Settings tab, or the Settings button on the Soundboard "
          "tab, and set Microphone to your real microphone and Virtual mic "
          "output to BlackHole 2ch. " + _BOTH_ENDS),
+        ("shot", "settings-macos", _WHERE),
         ("shot", "devices-macos", "What the two dropdowns should say."),
         ("step", "Allow the microphone",
          "macOS asks for microphone permission the first time. If you "
@@ -166,6 +174,7 @@ PAGES = {
          "tab, and set both Microphone and Virtual mic output to pulse, or "
          "to default if there is no pulse. The real choice happens in "
          "pavucontrol."),
+        ("shot", "settings-linux", _WHERE),
         ("shot", "devices-linux", "What the two dropdowns should say."),
         ("step", "Route it in pavucontrol",
          "Play a sound. In pavucontrol's Playback tab, find Soundboard's "

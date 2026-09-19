@@ -42,6 +42,14 @@ OUT_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
                        "assets", "tutorial")
 PAD = 10
 WINDOW = "900x800"
+# The shots in assets/ are two pixels per point, because they were taken
+# on a Retina screen, and the help draws them scaled down: a one-to-one
+# shot next to them is visibly soft on the same screen. On a display that
+# has no scaling of its own, SOUNDBOARD_SHOT_SCALE=2 draws the app twice
+# the size instead, which is the same pixels rather than an upscale. It
+# needs a screen to fit the bigger window: xvfb-run -s "-screen 0
+# 2000x1800x24". Leave it alone on a Retina Mac, which is already 2x.
+SCALE = float(os.environ.get("SOUNDBOARD_SHOT_SCALE", "1"))
 # Narrow enough that the warning fills its own width instead of
 # wrapping halfway across an empty label.
 WARNING_WINDOW = "820x800"
@@ -125,6 +133,11 @@ def main():
     platform_name = sys.argv[1]
     if platform_name not in DEVICES:
         raise SystemExit(f"unknown platform {platform_name!r}; expected one of {', '.join(DEVICES)}")
+    if SCALE != 1:
+        # CustomTkinter's own scaling, so the widgets are drawn bigger
+        # rather than the image being stretched afterwards.
+        ctk.set_widget_scaling(SCALE)
+        ctk.set_window_scaling(SCALE)
     root = ctk.CTk()
     root.geometry(WINDOW)
     board = Soundboard(root)
@@ -137,6 +150,16 @@ def main():
     if board._meter_poll is not None:
         root.after_cancel(board._meter_poll)
         board._meter_poll = None
+    # Where the settings are, shot first and with the panel still
+    # collapsed: the step before it tells the reader to find a tab or a
+    # button, and this is the state they are looking at while they do.
+    # The tab strip is the tabview's own segmented button, which is not
+    # kept on the app. The pad is tighter than the rest because the
+    # button is packed hard against the row under it, and the usual one
+    # crops a slice of the profile row into the shot.
+    shoot(root, f"settings-{platform_name}",
+          board.tabview._segmented_button, board.settings_button, pad=2)
+
     # The settings panel is collapsed on the Soundboard tab, and a crop
     # follows widget geometry: an unmapped panel has none to follow. The
     # help talks the reader through the Soundboard tab, so open it there
