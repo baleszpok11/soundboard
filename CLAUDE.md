@@ -49,6 +49,13 @@ virtual audio cable.
   the main thread before starting pynput (pynput reads it on its listener
   thread, which current macOS kills the process for). Missing Input
   Monitoring/Accessibility permission is detected and shown as a warning
+- Startup: scipy.signal is over half the app's import time, and pulls in
+  scipy.stats and scipy.interpolate with it, while nothing that draws the
+  window filters anything. It is imported on first use through
+  audio_engine.scipy_signal() and warmed on a worker thread once the
+  window is up, so the editor's first effect does not stall on it.
+  Choosing the telephone mic effect imports it on the thread that chose
+  it: half a second inside the audio callback is a dropout
 - Editor DSP lives in dsp.py, not audio_engine.py: it works on a whole
   clip and can take a second, while the engine has to fill a block
   before the sound card asks again. Pitch and speed are separate there

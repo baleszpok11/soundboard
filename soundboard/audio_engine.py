@@ -7,7 +7,6 @@ import threading
 import time
 
 import numpy as np
-from scipy.signal import butter, sosfilt, sosfilt_zi
 try:
     import sounddevice as sd
 except OSError as e:
@@ -17,6 +16,29 @@ except OSError as e:
 else:
     PORTAUDIO_ERROR = None
 import soundfile as sf
+
+
+_scipy_signal = None
+
+
+def scipy_signal():
+    """scipy.signal, imported the first time something filters rather
+    than at startup.
+
+    It is the largest single cost of starting the app - more than half
+    of the import time, and it drags in scipy.stats and scipy.interpolate
+    on the way, neither of which anything here uses - and nothing that
+    draws the window needs a filter. Nobody reaches it from the audio
+    callback without the engine having warmed it first: half a second
+    inside a callback is a dropout, so set_mic_effect() does the import
+    while the effect is being chosen.
+    """
+    global _scipy_signal
+    if _scipy_signal is None:
+        import scipy.signal
+        _scipy_signal = scipy.signal
+    return _scipy_signal
+
 
 SAMPLE_RATE = 48000
 CHANNELS = 2
@@ -356,9 +378,10 @@ class _MicEffectChain:
 
     def _telephone(self, block):
         channels = block.shape[1]
+        sig = scipy_signal()
         if self._sos is None or channels != self._channels:
             low, high = MIC_PHONE_BAND_HZ
-            self._sos = butter(4, [low, high], btype="band", fs=SAMPLE_RATE, output="sos")
+            self._sos = sig.butter(4, [low, high], btype="band", fs=SAMPLE_RATE, output="sos")
             self._channels = channels
             self._zi = None
         if self._zi is None:
@@ -366,10 +389,10 @@ class _MicEffectChain:
                 return block
             # Start each section settled on the first sample, so the
             # filter doesn't thump while it fills. (sections, 2, channels)
-            self._zi = (sosfilt_zi(self._sos)[:, :, None] * block[0]).astype(np.float32)
+            self._zi = (sig.sosfilt_zi(self._sos)[:, :, None] * block[0]).astype(np.float32)
         out = np.empty_like(block)
         for ch in range(channels):
-            out[:, ch], self._zi[:, :, ch] = sosfilt(
+            out[:, ch], self._zi[:, :, ch] = sig.sosfilt(
                 self._sos, block[:, ch], zi=self._zi[:, :, ch])
         return out
 
@@ -599,6 +622,11 @@ class AudioEngine:
     def set_mic_effect(self, name, amount):
         """Change the live mic effect. Takes the lock so the callback
         never reads a half-applied change."""
+        if name == "telephone":
+            # The one effect that filters. Import scipy here, on the
+            # thread that picked it, rather than leaving the callback to
+            # do it between two blocks.
+            scipy_signal()
         with self._lock:
             self.mic_effects.set(name, amount)
 

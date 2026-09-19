@@ -7,9 +7,8 @@ fill a block before the sound card asks again.
 
 import numpy as np
 import soundfile as sf
-from scipy.signal import butter, lfilter, sosfilt
 
-from .audio_engine import _resample
+from .audio_engine import _resample, scipy_signal
 
 BASS_CUTOFF_HZ = 200.0
 TREBLE_CUTOFF_HZ = 4000.0
@@ -59,7 +58,7 @@ def apply_bass(data, gain_db, sample_rate, cutoff_hz=BASS_CUTOFF_HZ):
     b, a = _low_shelf_coeffs(gain_db, cutoff_hz, sample_rate)
     filtered = np.empty_like(data)
     for ch in range(data.shape[1]):
-        filtered[:, ch] = lfilter(b, a, data[:, ch])
+        filtered[:, ch] = scipy_signal().lfilter(b, a, data[:, ch])
     return filtered.astype(np.float32)
 
 
@@ -97,7 +96,7 @@ def _peaking_coeffs(gain_db, centre_hz, sample_rate, q=MID_Q):
 def _filter(data, b, a):
     filtered = np.empty_like(data)
     for ch in range(data.shape[1]):
-        filtered[:, ch] = lfilter(b, a, data[:, ch])
+        filtered[:, ch] = scipy_signal().lfilter(b, a, data[:, ch])
     return filtered.astype(np.float32)
 
 
@@ -121,10 +120,10 @@ def apply_telephone(data, sample_rate, low_hz=PHONE_LOW_HZ, high_hz=PHONE_HIGH_H
     top = min(high_hz, sample_rate / 2 * 0.99)
     if top <= low_hz:
         return data
-    sos = butter(4, [low_hz, top], btype="band", fs=sample_rate, output="sos")
+    sos = scipy_signal().butter(4, [low_hz, top], btype="band", fs=sample_rate, output="sos")
     filtered = np.empty_like(data)
     for ch in range(data.shape[1]):
-        filtered[:, ch] = sosfilt(sos, data[:, ch])
+        filtered[:, ch] = scipy_signal().sosfilt(sos, data[:, ch])
     return filtered.astype(np.float32)
 
 
@@ -376,7 +375,7 @@ def measure_loudness(data, sample_rate):
     if block < 1 or len(data) < block:
         return None
 
-    weighted = sosfilt(_k_weighting_sos(sample_rate), data, axis=0)
+    weighted = scipy_signal().sosfilt(_k_weighting_sos(sample_rate), data, axis=0)
     # Mean square per block, summed across channels (the spec's weights
     # are 1 for left and right, and this app never sees surround).
     running = np.concatenate([[0.0], np.cumsum((weighted ** 2).sum(axis=1))])

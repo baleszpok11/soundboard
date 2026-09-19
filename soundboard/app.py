@@ -1,11 +1,12 @@
 """The main window: builds the tabs and holds the state the UI mixins share."""
 
 import os
+import threading
 import tkinter as tk
 
 import customtkinter as ctk
 
-from .audio_engine import AudioEngine
+from .audio_engine import AudioEngine, scipy_signal
 from .config import (
     CONFIG_PATH,
     active_profile,
@@ -217,6 +218,17 @@ class Soundboard(DeviceMixin, MicHotkeyMixin, SoundListMixin, DownloadMixin, Edi
             self.measure_board()
         if self.config["close_to_tray"]:
             self._start_tray()
+        self._warm_filters()
+
+    def _warm_filters(self):
+        """Load scipy on a worker thread now the window is up.
+
+        It is half the app's import time and nothing draws the window
+        with it, which is why it is no longer imported at startup - but
+        the first editor effect would then stall on it, so it is fetched
+        here instead, where nobody is waiting.
+        """
+        threading.Thread(target=scipy_signal, daemon=True).start()
 
     def _build_settings(self, board_tab):
         """The settings live in their own tab, and the Soundboard tab can
