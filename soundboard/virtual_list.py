@@ -53,12 +53,28 @@ class VirtualList(ctk.CTkFrame):
         # A raw canvas cannot hold a (light, dark) pair the way a CTk
         # widget can, so the theme has to repaint it on a mode change.
         register_tk(self._canvas, bg=COLOR_BG)
-        # The wheel is Tk's own; the trackpad needs the same help a
-        # CTkScrollableFrame gets (see mac_scroll).
+        # The trackpad needs the same help a CTkScrollableFrame gets
+        # (see mac_scroll).
         bind_canvas(self._canvas)
-        self._canvas.bind("<MouseWheel>", self._wheel)
-        self._canvas.bind("<Button-4>", self._wheel)
-        self._canvas.bind("<Button-5>", self._wheel)
+        # The wheel goes through bind_all, filtered to events that
+        # happened inside this list - which is what CustomTkinter does
+        # for its own scrollable frame, and for the same two reasons. A
+        # binding on the canvas alone fires only for events delivered to
+        # the canvas: on X11 and macOS that means the gaps between rows,
+        # since a row is a widget of its own and Tk does not walk up the
+        # widget tree; on Windows it means never, because <MouseWheel>
+        # there goes to the widget with keyboard focus and this canvas
+        # takes none.
+        #
+        # Bound once and left, rather than on the way in and out:
+        # unbind_all drops every binding for that sequence, CustomTkinter
+        # included, so leaving this list would stop the editor's own
+        # scrolling frame from answering the wheel.
+        # Through the raw canvas: CustomTkinter refuses bind_all on its
+        # own widgets, and the binding lands on Tk's "all" tag either
+        # way. mac_scroll takes the same route for the trackpad.
+        for sequence in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
+            self._canvas.bind_all(sequence, self._wheel, add="+")
         self._count = 0
         self._columns = 1
         self._pitch = (1, 1)
@@ -70,14 +86,30 @@ class VirtualList(ctk.CTkFrame):
         self._scrollbar.set(first, last)
         self.sync()
 
+    def _inside(self, widget):
+        """Whether the event belongs to this list. bind_all is the whole
+        application, so a wheel over another scrolling area must not
+        move this one as well."""
+        while widget is not None:
+            if widget is self:
+                return True
+            widget = getattr(widget, "master", None)
+        return False
+
     def _wheel(self, event):
+        if not self._canvas.winfo_exists() or not self._inside(event.widget):
+            return
         if event.num == 4:
             delta = -1
         elif event.num == 5:
             delta = 1
         else:
-            delta = -1 if event.delta > 0 else 1
-        self._canvas.yview_scroll(delta, "units")
+            # Windows reports the wheel in multiples of 120, one notch
+            # each; macOS reports small counts already.
+            notches = event.delta / 120 if abs(event.delta) >= 120 else event.delta
+            delta = -1 if notches > 0 else 1
+            delta *= max(1, int(abs(notches)))
+        self._canvas.yview_scroll(int(delta), "units")
 
     def _resized(self, _event):
         """A width change can alter the shape of the content itself - the

@@ -789,7 +789,11 @@ class EditorMixin:
             return
         try:
             processed = self._get_editor_processed_data()
-            self.audio_engine.play_data(processed, self.editor_samplerate, key=EDITOR_PREVIEW_KEY)
+            # local_only: a preview is you listening to your own edit.
+            # Without it, everyone in the call hears every pass over the
+            # same four seconds while you work on it.
+            self.audio_engine.play_data(
+                processed, self.editor_samplerate, key=EDITOR_PREVIEW_KEY, local_only=True)
         except Exception as e:
             error(self.root, "Preview error", str(e))
             return
