@@ -88,8 +88,13 @@ def _write_clip(path, seconds=1.0, rate=44100):
             for t in range(frames)))
 
 
-def make_board_files(names=DEFAULT_SOUNDS, appearance="dark"):
-    """Write a config and its clips into the throwaway directory."""
+def make_board_files(names=DEFAULT_SOUNDS, appearance="dark", settings=None):
+    """Write a config and its clips into the throwaway directory.
+
+    `settings` is anything a scenario needs switched on before the app
+    reads the file - a setting the window applies at startup cannot be
+    turned on from inside the scenario, because by then it has started.
+    """
     sounds = []
     for name in names:
         filename = name.lower().replace(" ", "_") + ".wav"
@@ -103,7 +108,8 @@ def make_board_files(names=DEFAULT_SOUNDS, appearance="dark"):
                    # worker thread and calls root.after() when it does,
                    # which throws once the run has finished and buries
                    # the failures under a traceback.
-                   "check_for_updates": False},
+                   "check_for_updates": False,
+                   **(settings or {})},
                   handle)
     return sounds
 
@@ -114,8 +120,8 @@ class Board:
     GEOMETRY = "900x800+60+60"
 
     def __init__(self, geometry=GEOMETRY, sounds=DEFAULT_SOUNDS,
-                 appearance="dark"):
-        make_board_files(sounds, appearance)
+                 appearance="dark", settings=None):
+        make_board_files(sounds, appearance, settings)
         os.makedirs(SHOT_DIR, exist_ok=True)
         self.failures = []
         self.root = ctk.CTk()

@@ -27,6 +27,10 @@ together, from one virtual microphone.
   that has no links behind it
 - Automatic daily backups of your board, and a restore button, so a
   profile deleted by accident can be brought back
+- Remote control: switch it on and a Stream Deck, an OBS script or
+  `soundboard --play Airhorn` can fire a sound, stop, mute, change the
+  volume or switch profile. Off by default, and it only ever listens on
+  this computer
 - Mixes your real microphone with soundboard clips in real time, so
   people hear both at once — no separate mixer app needed
 - Mic processing: a noise gate to drop the room between words, a rumble
@@ -437,6 +441,85 @@ Restoring brings back the profiles and sounds that backup held. Your
 devices and other settings are left as they are, no audio file is
 touched, and the board as it is now is backed up first - so restoring
 the wrong day is itself undoable.
+
+### Remote control
+
+Other programs on the same computer can drive the board: a Stream Deck
+plugin, an OBS script, a chat bot, a shell alias. It is off until you
+switch it on, under **Remote control** in Settings.
+
+It listens on `127.0.0.1` only - this computer, never the network -
+whatever port it is on. There is no password, and that is why: a
+soundboard anyone on the network can fire is not something a password
+shipped inside the app would fix.
+
+From a terminal, with the app running:
+
+```bash
+python main.py --play "Airhorn"     # or an index: --play 3
+python main.py --stop-all
+python main.py --volume 80          # the soundboard volume, in percent
+python main.py --mute on            # the microphone; no value toggles
+python main.py --profile "Gaming"
+python main.py --next               # --previous, --pause
+python main.py --status             # what is playing
+python main.py --sounds             # what there is to play
+python main.py --help
+```
+
+These talk to the window that is already open rather than starting a
+second copy, and print the reply as JSON. The exit code is 0 when the
+command worked.
+
+A built executable takes the same flags. Windows builds are windowed
+programs with no console attached, so there the reply may not appear in
+your terminal even though the command ran - use the exit code, or the
+socket directly.
+
+#### Writing your own client
+
+The channel is a TCP socket carrying one JSON object per line, and one
+JSON object back per line. Any language that can open a socket can use
+it:
+
+```python
+import json, socket
+
+with socket.create_connection(("127.0.0.1", 8767)) as sock:
+    sock.sendall(json.dumps({"command": "play", "sound": "Airhorn"}).encode() + b"\n")
+    print(sock.makefile("rb").readline())
+# {"ok": true, "index": 0, "name": "Airhorn"}
+```
+
+Every reply has `"ok"`. A failure carries `"error"` with a sentence you
+can show to whoever is driving.
+
+| Command | Takes | Does |
+| --- | --- | --- |
+| `ping` | | Answers with the app's version and the protocol number |
+| `play` | `sound` or `index` | Plays it |
+| `stop` | `sound` or `index` | Stops that one |
+| `stop_all` | | Stops everything |
+| `pause` | | Pauses, or lets a paused board go on |
+| `next`, `previous` | | Steps through the board |
+| `mute` | `value`: true, false, or leave it out to toggle | The microphone |
+| `volume` | `value`: 0-150 | The soundboard volume, in percent |
+| `profile` | `name` | Switches profile |
+| `profiles` | | Lists the profiles and says which is active |
+| `sounds` | | Lists the active profile's sounds with their indexes |
+| `status` | | What is playing, and how far through |
+
+A sound is addressed by `index` or by `sound` (its name, case
+insensitive), and `index` wins if you send both. Indexes are positions
+in the active profile counted from 0, in the profile's own order - a
+search or a sort in the window does not move them, so a button you
+bound once keeps firing the same clip. Names are not unique, so a name
+that matches two sounds is refused with an error telling you to use the
+index rather than guessing which you meant.
+
+`protocol` in the `ping` reply is bumped if a command's meaning ever
+changes. New commands and new fields do not bump it, so ignore fields
+you do not know.
 
 ### Where your data is stored
 

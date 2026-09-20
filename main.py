@@ -18,9 +18,16 @@ import traceback
 
 import customtkinter as ctk
 
+from soundboard import remote
 from soundboard.app import Soundboard
 from soundboard.audio_engine import PORTAUDIO_ERROR, sd
-from soundboard.config import ICON_ICO_PATH, ICON_PATH, write_error_log
+from soundboard.config import (
+    ICON_ICO_PATH,
+    ICON_PATH,
+    REMOTE_PORT,
+    load_config,
+    write_error_log,
+)
 from soundboard.dialogs import handle_exception, show_error
 from soundboard.mac_scroll import fix_trackpad_scrolling
 from soundboard.win_window import (
@@ -61,6 +68,21 @@ def _fit_to_screen(root):
             root.state("zoomed")
     except tk.TclError:
         root.geometry(f"{root.winfo_screenwidth()}x{root.winfo_screenheight()}+0+0")
+
+
+def _run_remote_command():
+    """Hand the arguments to a Soundboard that is already running.
+
+    This path must not build a window: `soundboard --play Airhorn` is
+    what a Stream Deck button runs, and starting a second copy of the
+    app would fight the first one over the audio devices. It reads the
+    config only for the port the running copy was told to listen on.
+    """
+    try:
+        port = load_config().get("remote_port", REMOTE_PORT)
+    except (ValueError, OSError):
+        port = REMOTE_PORT  # an unreadable config is the app's problem, not ours
+    return remote.run_cli(sys.argv[1:], port)
 
 
 def main():
@@ -108,4 +130,8 @@ def main():
 
 
 if __name__ == "__main__":
+    # A remote command talks to the running app and never opens a
+    # window, so it is answered before anything here builds one.
+    if remote.is_cli(sys.argv[1:]):
+        sys.exit(_run_remote_command())
     main()

@@ -13,7 +13,8 @@ virtual audio cable.
     for the editor: filters, phase vocoder), `hotkeys.py` (listener and
     platform quirks), `dialogs.py`, `downloader.py` (yt-dlp), `config.py`,
     `theme.py`, `tray.py`, `autostart.py`, `bug_report.py`,
-    `virtual_list.py` (the board's scroller)
+    `virtual_list.py` (the board's scroller), `remote.py` (the local
+    control channel and its command line)
 - Config, `Sounds/` and `assets/` live at the repo root when running
   from source: `config.py` anchors them one level up from itself. A
   built app puts user data in the per-user folder instead
@@ -278,6 +279,27 @@ virtual audio cable.
   picked once is unreadable in one of the two appearance modes, and an
   unknown name falls back to the plain tile. Play counts are written
   through _save_config_soon, the same debounce the sliders use
+- Remote control: remote.py is a loopback-only TCP socket carrying one
+  JSON object per line, off until config "remote_control" switches it
+  on. HOST is a constant and is never read from the config - a socket
+  bound to anything else turns a soundboard into a noise generator
+  anyone on the network can fire, and there is no password that would
+  make that safe, the same reasoning as the rule against shipping a
+  token. Commands arrive on a socket thread and everything they touch
+  is Tk or engine state, so RemoteMixin._remote_command hands each one
+  to the Tk thread with after() and waits on it, bounded; the e2e
+  scenario asserts that the handler really ran on the main thread,
+  because Tk here answers a cross-thread call often enough that the
+  whole scenario still passes with the marshalling taken out. A sound
+  is addressed by "index" or by "sound", index wins when both are
+  given, and a name that matches two entries is refused rather than
+  guessed at - and an index is a position in the profile, not on
+  screen, so a search or a sort cannot move what a Stream Deck button
+  fires. The switch and the port are built in devices.py rather than in
+  remote.py, so that `soundboard --play X` does not import
+  CustomTkinter to send one line down a socket. The protocol is
+  documented in the README, which is what other people write their
+  client against: change both together
 - End-to-end tests: tools/e2e/run.py builds a real window against a
   temporary config and Sounds/ and asserts on what it lays out. Needs a
   display (xvfb-run on Linux); exit code is the number of failed
@@ -292,7 +314,10 @@ virtual audio cable.
   Each scenario runs in its own subprocess, since Tk does not reliably
   survive a second root window in one interpreter. A scenario can pin
   the window size it needs (`scenario.geometry`): layout bugs are often
-  width-dependent and right themselves at another size. Import app
+  width-dependent and right themselves at another size. It can also pin
+  config keys (`scenario.settings`), which is the only way to test
+  something the app reads at startup - by the time the scenario runs it
+  has already started. Import app
   classes through the package (`from soundboard.flow_row import
   FlowRow`) - imported bare they are a second, unrelated class object
   and every isinstance check is quietly False
