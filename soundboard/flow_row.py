@@ -35,6 +35,7 @@ class FlowRow(ctk.CTkFrame):
         self._gap = gap
         self._line_gap = line_gap
         self._width = 0
+        self._pending = None
         # The height is ours to report, so Tk must not take it from the
         # children instead.
         self.pack_propagate(False)
@@ -45,7 +46,28 @@ class FlowRow(ctk.CTkFrame):
         case where a checkbox wants more air than a button does."""
         self._items.append((widget, side,
                             self._gap if gap is None else gap))
+        # A child added after a reflow would otherwise never be laid out
+        # at all. _resized only reflows when the width changes, and the
+        # width does not change just because the row gained a child - so
+        # whatever was added after the first <Configure> stays unplaced,
+        # invisible, and not even mapped.
+        #
+        # That is not a corner case: building a CTk widget can pump the
+        # event loop - a CTkOptionMenu builds a dropdown of its own - so
+        # the first <Configure> can arrive between two add() calls and
+        # take the row's width with one child in it.
+        self._reflow_soon()
         return widget
+
+    def _reflow_soon(self):
+        """Once per idle pass, however many children are added."""
+        if self._pending is None:
+            self._pending = self.after_idle(self._reflow_now)
+
+    def _reflow_now(self):
+        self._pending = None
+        if self.winfo_exists():
+            self.reflow()
 
     def _resized(self, event):
         # Only a width change can alter the layout, and reflowing sets a

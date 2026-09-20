@@ -183,6 +183,12 @@ def prepare_config(config):
     config.setdefault("gate_threshold", -45)
     config.setdefault("mic_highpass", True)
     config.setdefault("mic_effect_amount", 70)
+    # How the board is ordered and filtered. "custom" is the order the
+    # sounds are in, which is what dragging a row rearranges and what
+    # every board had before there was a choice.
+    config.setdefault("sound_sort", "custom")
+    config.setdefault("favourites_first", True)
+    config.setdefault("sound_category", None)
     config.setdefault("ptt_hotkey", None)
     config.setdefault("sound_view", "list")
     # Transport: playing the board as a list rather than one clip at a
@@ -258,6 +264,21 @@ def _load_sound(sound):
     sound.setdefault("enabled", True)
     sound.setdefault("loop", False)
     sound.setdefault("volume", 100)
+    # How a big board is organised. All optional, all defaulted here, and
+    # none of them affect what a sound plays - an older Soundboard opening
+    # a board written by a newer one ignores every one of these and still
+    # plays the board, the same rule "paths" follows above. "category" and
+    # "colour" are free text and a palette name; an unknown colour falls
+    # back to the plain tile rather than failing.
+    sound.setdefault("favourite", False)
+    sound.setdefault("category", None)
+    sound.setdefault("colour", None)
+    sound.setdefault("plays", 0)
+    sound.setdefault("last_played", None)
+    # Only set when a sound joins the board from now on. Everything
+    # already on a board has no date and sorts as the oldest, which is
+    # true of it.
+    sound.setdefault("added", None)
     _load_sound_group(sound)
     _load_sound_loudness(sound)
     _load_sound_fades(sound)

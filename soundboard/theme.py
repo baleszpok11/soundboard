@@ -436,3 +436,25 @@ def apply_theme(mode="system"):
     merge("CTk", fg_color=list(COLOR_BG))
     merge("CTkToplevel", fg_color=list(COLOR_BG))
     return set_appearance(mode)
+
+
+# A sound's own colour in the grid, as (light, dark) pairs like every
+# other token here - a raw hex picked once would be unreadable in one of
+# the two modes. The names are what goes in the config, so a board stays
+# readable if the palette is ever retuned, and an unknown name simply
+# falls back to the default tile.
+TILE_COLOURS = {
+    "Red":    ("#e57373", "#8e3b3b"),
+    "Orange": ("#f0a35e", "#8f5a2a"),
+    "Yellow": ("#e6c860", "#86722a"),
+    "Green":  ("#7cb87c", "#3d6b3d"),
+    "Teal":   ("#68b4b4", "#2f6363"),
+    "Blue":   ("#7aa5d8", "#375a85"),
+    "Purple": ("#a98ad0", "#54407a"),
+    "Pink":   ("#dd8fb4", "#7d4361"),
+}
+
+
+def tile_colour(name, default):
+    """A tile's fill, or `default` when it has no colour of its own."""
+    return TILE_COLOURS.get(name, default)

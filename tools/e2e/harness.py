@@ -111,7 +111,9 @@ def make_board_files(names=DEFAULT_SOUNDS, appearance="dark"):
 class Board:
     """A running app, and the checks that can be made against it."""
 
-    def __init__(self, geometry="900x800+60+60", sounds=DEFAULT_SOUNDS,
+    GEOMETRY = "900x800+60+60"
+
+    def __init__(self, geometry=GEOMETRY, sounds=DEFAULT_SOUNDS,
                  appearance="dark"):
         make_board_files(sounds, appearance)
         os.makedirs(SHOT_DIR, exist_ok=True)

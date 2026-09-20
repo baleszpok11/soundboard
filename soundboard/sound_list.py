@@ -62,9 +62,11 @@ from .theme import (
     COLOR_TEXT_DIM,
     GAP,
     RADIUS_CONTROL,
+    TILE_COLOURS,
     VOLUME_MAX,
     font,
     resolve,
+    tile_colour,
 )
 
 PLAYING_POLL_MS = 100  # how often the board re-reads what the engine is playing
@@ -75,6 +77,18 @@ RECORD_POLL_MS = 200  # how often the Record button's elapsed time is redrawn
 _length_cache = {}  # (path, mtime, size) -> "m:ss", so a redraw doesn't re-read every file
 AUDIO_EXTENSIONS = (".wav", ".flac", ".ogg", ".mp3")
 IMPORT_REPORT_NAMES = 10  # names listed before the rest are counted
+ALL_CATEGORIES = "All"  # the filter's own entry, never a category name
+_UNSET = object()  # "no argument", where None is a real one
+# The sorts offered, config value -> what the menu says. "custom" is the
+# order the sounds are in, which is what dragging a row rearranges.
+SORT_LABELS = {
+    "custom": "My order",
+    "name": "Name",
+    "plays": "Most played",
+    "recent": "Last played",
+    "added": "Newest",
+    "length": "Length",
+}
 
 
 def _clip_length(path):
@@ -246,6 +260,34 @@ class SoundListMixin:
         self.view_switch.set("Grid" if self.config["sound_view"] == "grid" else "List")
         self.view_switch.pack(side="left", padx=(8, 0))
 
+        # A second toolbar row: the first is already full at the window's
+        # own minimum width, and these two are a pair.
+        filters = FlowRow(parent, fg_color=COLOR_BG)
+        filters.pack(fill="x", padx=4, pady=(6, 0))
+        filters.add(ctk.CTkLabel(filters, text="Show:", text_color=COLOR_TEXT_DIM))
+        self.category_var = tk.StringVar(value=ALL_CATEGORIES)
+        self.category_menu = filters.add(ctk.CTkOptionMenu(
+            filters, variable=self.category_var, values=[ALL_CATEGORIES],
+            command=self._on_category_filter,
+            fg_color=COLOR_ROW, text_color=COLOR_TEXT,
+        ))
+        filters.add(ctk.CTkLabel(filters, text="Sort:", text_color=COLOR_TEXT_DIM), gap=12)
+        self.sort_var = tk.StringVar(value=SORT_LABELS.get(
+            self.config.get("sound_sort", "custom"), SORT_LABELS["custom"]))
+        filters.add(ctk.CTkOptionMenu(
+            filters, variable=self.sort_var, values=list(SORT_LABELS.values()),
+            command=self._on_sort_change,
+            fg_color=COLOR_ROW, text_color=COLOR_TEXT,
+        ))
+        self.favourites_checkbox = ctk.CTkCheckBox(
+            filters, text="Favourites first", command=self._on_favourites_first,
+            fg_color=COLOR_ORANGE, hover_color=COLOR_ORANGE_HOVER,
+            checkmark_color=COLOR_ON_ACCENT, text_color=COLOR_TEXT,
+        )
+        if self.config.get("favourites_first", True):
+            self.favourites_checkbox.select()
+        filters.add(self.favourites_checkbox, gap=12)
+
         # No label bar: it was a full-width strip of chrome restating the
         # name of the tab it sits in. The rows read as cards against the
         # tab's own background instead.
@@ -343,6 +385,45 @@ class SoundListMixin:
         save_config(self.config)
         self._refresh_sound_list()
 
+    def _on_category_filter(self, value):
+        self.config["sound_category"] = None if value == ALL_CATEGORIES else value
+        save_config(self.config)
+        self._refresh_sound_list()
+
+    def _on_sort_change(self, value):
+        for key, label in SORT_LABELS.items():
+            if label == value:
+                self.config["sound_sort"] = key
+                break
+        save_config(self.config)
+        self._refresh_sound_list()
+
+    def _on_favourites_first(self):
+        self.config["favourites_first"] = bool(self.favourites_checkbox.get())
+        save_config(self.config)
+        self._refresh_sound_list()
+
+    def _refresh_category_menu(self):
+        """The filter's choices, and the filter itself if the category it
+        was showing has just lost its last sound."""
+        names = self.categories()
+        self.category_menu.configure(values=[ALL_CATEGORIES] + names)
+        current = self.config.get("sound_category")
+        if current and current not in names:
+            self.config["sound_category"] = current = None
+        self.category_var.set(current or ALL_CATEGORIES)
+
+    def _can_reorder(self):
+        """Dragging rearranges the sounds themselves, so it only means
+        anything while the board is showing all of them in their own
+        order. Under a search, a category or any other sort, the row
+        above is not the sound above."""
+        return (not self._search_text
+                and not self.config.get("sound_category")
+                and self.config.get("sound_sort", "custom") == "custom"
+                and not (self.config.get("favourites_first", True)
+                         and any(s.get("favourite") for s in self.sounds)))
+
     def _grid_column_count(self):
         width = self.list_frame.viewport_width()
         return max(1, width // 190) if width > 1 else 4
@@ -353,18 +434,80 @@ class SoundListMixin:
         scroller's own <Configure>, which then syncs."""
         self._set_list_shape()
 
+    def categories(self):
+        """Every category in use on this board, in alphabetical order.
+
+        Derived rather than stored: a category exists exactly while some
+        sound is in it, so there is no second list to keep in step with
+        the sounds and nothing to tidy up when the last one leaves.
+        """
+        return sorted({s.get("category") for s in self.sounds if s.get("category")})
+
+    def _sort_key(self, pair):
+        """How one (index, sound) pair orders under the current sort.
+
+        Favourites lead whatever else is chosen, so a favourite is still
+        findable when the board is sorted by something else. The index is
+        the last term of every key: it keeps the sort stable, and it is
+        the whole key under "custom", which is the order the sounds are
+        in and what dragging a row rearranges.
+        """
+        index, sound = pair
+        lead = 0 if (self.config.get("favourites_first", True)
+                     and sound.get("favourite")) else 1
+        sort = self.config.get("sound_sort", "custom")
+        if sort == "name":
+            return (lead, sound["name"].lower(), index)
+        if sort == "plays":
+            # Descending: the most played is the one being looked for.
+            return (lead, -int(sound.get("plays") or 0), index)
+        if sort == "recent":
+            return (lead, -float(sound.get("last_played") or 0), index)
+        if sort == "added":
+            # Nothing on a board from before this was recorded has a
+            # date, and those are the oldest sounds on it.
+            return (lead, -float(sound.get("added") or 0), index)
+        if sort == "length":
+            return (lead, self._sort_length(sound), index)
+        return (lead, index)
+
+    @staticmethod
+    def _sort_length(sound):
+        """A clip's length in seconds for sorting. _clip_length caches on
+        the file's mtime and size, so sorting a big board reads each
+        header once, not once per keystroke. A file that cannot be read
+        sorts last rather than breaking the sort."""
+        text = _clip_length(resolve_sound_path(sound["path"]))
+        if text is None:
+            return float("inf")
+        minutes, seconds = text.split(":")
+        return int(minutes) * 60 + int(seconds)
+
     def _visible_sounds(self):
-        """(index, sound) pairs matching the search box."""
+        """(index, sound) pairs left by the search box and the category
+        filter, in the order the sort asks for.
+
+        The index is the sound's place in the profile, not its place on
+        screen: everything downstream - playing, dragging, the menus -
+        addresses a sound by that, so sorting the board cannot move what
+        a row refers to.
+        """
         query = self._search_text
-        return [
+        category = self.config.get("sound_category")
+        pairs = [
             (i, s) for i, s in enumerate(self.sounds)
-            if not query or query in s["name"].lower()
+            if (not query or query in s["name"].lower())
+            and (not category or s.get("category") == category)
         ]
+        pairs.sort(key=self._sort_key)
+        return pairs
 
     def _refresh_sound_list(self):
         """Take what the search leaves and hand it to the scroller. The
         widgets are not built here: the scroller calls back with the
         slice that is actually on screen, which is all that gets built."""
+        if hasattr(self, "category_menu"):
+            self._refresh_category_menu()
         self._visible = self._visible_sounds()
         if self._visible:
             if self.empty_label.winfo_manager():
@@ -498,8 +641,14 @@ class SoundListMixin:
         slot["idx"], slot["sound"] = idx, sound
         missing = not os.path.exists(resolve_sound_path(sound["path"]))
         enabled = sound.get("enabled", True)
-        lines = textwrap.wrap(sound["name"], 20)[:2] or [""]
-        if len(textwrap.wrap(sound["name"], 20)) > 2:
+        name = sound["name"]
+        if sound.get("favourite"):
+            # A star in the tile's own text, not a second widget on top
+            # of it: a tile is one button, and anything placed over it
+            # would eat the click that plays the sound.
+            name = "* " + name
+        lines = textwrap.wrap(name, 20)[:2] or [""]
+        if len(textwrap.wrap(name, 20)) > 2:
             lines[-1] = lines[-1][:17] + "..."
         if missing:
             lines.append("(file missing)")
@@ -510,9 +659,16 @@ class SoundListMixin:
             group = f"{clips} clips" if clips > 1 else ""
             length = _clip_length(resolve_sound_path(sound["path"])) or ""
             lines.append("  ".join(p for p in (hotkey, length, loop, group) if p) or " ")
+        # A sound's own colour replaces the accent, so a wall of tiles
+        # can be read at a glance. Only while it is playable: a disabled
+        # or missing clip has to keep saying so, which is what its own
+        # colour would otherwise hide.
+        fill = COLOR_ORANGE if enabled and not missing else COLOR_ROW
+        if enabled and not missing:
+            fill = tile_colour(sound.get("colour"), fill)
         slot["button"].configure(
             text="\n".join(lines),
-            fg_color=COLOR_ORANGE if enabled and not missing else COLOR_ROW,
+            fg_color=fill,
             text_color=COLOR_ON_ACCENT if enabled and not missing else (COLOR_ERROR if missing else COLOR_TEXT_DIM),
         )
         # Tiles are a single button, so stopping is done from the menu.
@@ -631,7 +787,25 @@ class SoundListMixin:
             name = name[:37] + "..."
         slot["label"].configure(
             text=name, text_color=COLOR_ERROR_TEXT if missing else COLOR_TEXT)
-        meta = [sound.get("hotkey") or "no hotkey"]
+        self._set_row_meta(slot, sound, resolved_path, missing)
+        slot["volume"].set(sound["volume"])
+        slot["volume_label"].configure(text=f"{sound['volume']}%")
+        self._playing_widgets[idx] = {
+            "key": self._sound_key(sound), "progress": slot["progress"],
+            "stop": slot["stop"], "before": slot["hotkey"],
+        }
+
+    def _set_row_meta(self, slot, sound, resolved_path=None, missing=None):
+        """The dim line under a name. Its own method because a play
+        count changes it without anything else about the row changing."""
+        if resolved_path is None:
+            resolved_path = resolve_sound_path(sound["path"])
+        if missing is None:
+            missing = not os.path.exists(resolved_path)
+        meta = []
+        if sound.get("favourite"):
+            meta.append("favourite")
+        meta.append(sound.get("hotkey") or "no hotkey")
         length = _clip_length(resolved_path)
         if length is not None:
             meta.append(length)
@@ -640,17 +814,49 @@ class SoundListMixin:
             meta.append(f"{clips} clips, random")
         if sound.get("loop"):
             meta.append("loop")
+        if sound.get("category"):
+            meta.append(sound["category"])
+        plays = int(sound.get("plays") or 0)
+        if plays:
+            meta.append(f"{plays} play" + ("" if plays == 1 else "s"))
         if missing:
             meta.append("file missing")
         slot["meta"].configure(
             text="  -  ".join(meta),
             text_color=COLOR_ERROR_TEXT if missing else COLOR_TEXT_DIM)
-        slot["volume"].set(sound["volume"])
-        slot["volume_label"].configure(text=f"{sound['volume']}%")
-        self._playing_widgets[idx] = {
-            "key": self._sound_key(sound), "progress": slot["progress"],
-            "stop": slot["stop"], "before": slot["hotkey"],
-        }
+
+    def _refresh_playing_meta(self, key):
+        """Redraw the rows showing this sound and nothing else, so a
+        play count is current without rebuilding the board under the
+        cursor of whoever just clicked it."""
+        for slot in self._row_pool:
+            sound = slot.get("sound")
+            if sound is not None and self._sound_key(sound) == key:
+                self._set_row_meta(slot, sound)
+
+    def set_favourite(self, index, value):
+        self.sounds[index]["favourite"] = bool(value)
+        save_config(self.config)
+        self._refresh_sound_list()
+
+    def set_category(self, index, name=_UNSET):
+        """Put a sound in a category. With no name, ask for one; None
+        takes it out of the one it is in."""
+        if name is _UNSET:
+            name = TextDialog(self.root, "Category", "Category name:",
+                              self.sounds[index].get("category") or "").get()
+            if name is None:
+                return
+            name = name.strip() or None
+        self.sounds[index]["category"] = name
+        save_config(self.config)
+        self._refresh_category_menu()
+        self._refresh_sound_list()
+
+    def set_colour(self, index, name):
+        self.sounds[index]["colour"] = name
+        save_config(self.config)
+        self._refresh_sound_list()
 
     def _show_sound_menu(self, event, index, anchor=None, from_tile=False):
         menu = tk.Menu(
@@ -675,6 +881,34 @@ class SoundListMixin:
             label="Loop", variable=self._loop_var,
             command=lambda: self._set_loop(index, self._loop_var.get()),
         )
+        # Held on self so the variable outlives the menu that reads it.
+        self._favourite_var = tk.BooleanVar(value=bool(sound.get("favourite")))
+        menu.add_checkbutton(
+            label="Favourite", variable=self._favourite_var,
+            command=lambda: self.set_favourite(index, self._favourite_var.get()),
+        )
+        categories = tk.Menu(menu, tearoff=0)
+        categories.add_command(label="New category...",
+                               command=lambda: self.set_category(index))
+        current = sound.get("category")
+        if current:
+            categories.add_command(label="Remove from category",
+                                   command=lambda: self.set_category(index, None))
+        known = [c for c in self.categories() if c != current]
+        if known:
+            categories.add_separator()
+            for name in known:
+                categories.add_command(
+                    label=name, command=lambda n=name: self.set_category(index, n))
+        menu.add_cascade(label="Category", menu=categories)
+        self._category_menu = categories  # outlives the call that built it
+        colours = tk.Menu(colour_parent := menu, tearoff=0)
+        colours.add_command(label="None", command=lambda: self.set_colour(index, None))
+        colours.add_separator()
+        for name in TILE_COLOURS:
+            colours.add_command(label=name, command=lambda n=name: self.set_colour(index, n))
+        colour_parent.add_cascade(label="Colour", menu=colours)
+        self._colour_menu = colours
         menu.add_command(label="Fades...", command=lambda: self.set_fades(index))
         menu.add_command(label="Re-measure loudness",
                          command=lambda: self.remeasure_sound(index))
@@ -735,7 +969,7 @@ class SoundListMixin:
     # Drag the "::" handle onto another row to move a sound there.
     def _start_drag(self, index):
         # Indices only line up with rows when the list isn't filtered.
-        self._drag_from = None if self._search_text else index
+        self._drag_from = index if self._can_reorder() else None
         self._drag_target = None
 
     def _row_at(self, x_root, y_root):
@@ -1214,7 +1448,7 @@ class SoundListMixin:
         be shared as links rather than audio. Files picked from disk and
         clips saved by the editor have none, and aren't shareable."""
         entry = {"name": name, "path": stored_path, "hotkey": None, "enabled": True,
-                 "volume": NEW_SOUND_VOLUME, "loop": False}
+                 "volume": NEW_SOUND_VOLUME, "loop": False, "added": time.time()}
         if source is not None:
             entry["source"] = source
         return entry
@@ -1360,6 +1594,21 @@ class SoundListMixin:
 
     def play_sound(self, sound):
         key = self._sound_key(sound)
+        # Counted here because everything that plays a sound comes
+        # through this one method - a click, a hotkey, the list running
+        # itself. Written through the same debounce the sliders use, so
+        # a burst of clips is one write rather than one write each; the
+        # count is not worth a file of its own while that is true.
+        sound["plays"] = int(sound.get("plays") or 0) + 1
+        sound["last_played"] = time.time()
+        self._save_config_soon()
+        # Only when the order or the text on screen depends on it, which
+        # it usually does not: rebuilding the list under someone's cursor
+        # every time they press a key would be worse than a stale count.
+        if self.config.get("sound_sort") in ("plays", "recent"):
+            self._refresh_sound_list()
+        else:
+            self._refresh_playing_meta(key)
         # Where Next and Previous carry on from, whatever started this
         # one: a click, a hotkey, or the list running itself.
         self._transport_key = key
