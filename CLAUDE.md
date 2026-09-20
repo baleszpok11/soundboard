@@ -257,6 +257,19 @@ virtual audio cable.
   backend as a data file that never gets analysed, so Xlib is left out
 - macOS dev: use Homebrew python@3.12 + python-tk@3.12 (Apple's CLT
   Python ships Tk 8.5, which renders blank windows)
+- End-to-end tests: tools/e2e/run.py builds a real window against a
+  temporary config and Sounds/ and asserts on what it lays out. Needs a
+  display (xvfb-run on Linux); exit code is the number of failed
+  scenarios. A scenario is a generator that yields between steps, and
+  the steps run as after() callbacks inside a real mainloop() - drive Tk
+  by pumping update() by hand instead and rows go unrendered and
+  positions come back that the running app never has, which invents
+  failures and hides real ones. Assertions are geometry (winfo_ismapped,
+  winfo_reqwidth, the scroller's canvas item widths), not pixel diffs:
+  geometry is stable across machines and says what is wrong. Screenshots
+  are saved on a failure as evidence for a human, never as the check.
+  Each scenario runs in its own subprocess, since Tk does not reliably
+  survive a second root window in one interpreter
 
 ## Constraints
 - Everything free and open-source. No paywalled dependencies or services.
