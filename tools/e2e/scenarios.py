@@ -34,6 +34,7 @@ def board_opens(board):
     """
     board.shot("board-opens")
     board.expect_visible(board.list_frame, "sound list")
+    board.expect_drawn(board.list_frame, "the sound list at startup")
     board.expect_rows_full_width()
     board.check(
         len(board.rows_on_screen) > 0,
@@ -76,6 +77,7 @@ def settings_button(board):
     board.expect_hidden(board.app.settings_panel, "settings panel")
     board.expect_visible(board.list_frame, "sound list")
     board.expect_rows_full_width()
+    board.expect_drawn(board.list_frame, "the sound list, back from the settings")
     for widget in board.widgets_below_settings():
         board.expect_visible(widget, f"{type(widget).__name__} on the board")
     board.expect_restored(before, "a trip to the settings and back")
@@ -99,6 +101,7 @@ def settings_tab_round_trip(board):
     board.shot("back-on-board")
     board.expect_visible(board.list_frame, "sound list")
     board.expect_rows_full_width()
+    board.expect_drawn(board.list_frame, "the sound list after a tab round trip")
     board.expect_restored(before, "a round trip through the Settings tab")
     yield
 

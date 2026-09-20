@@ -181,7 +181,7 @@ class Soundboard(DeviceMixin, MicHotkeyMixin, SoundListMixin, DownloadMixin, Edi
         for tab in (board_tab, download_tab, editor_tab, tts_tab,
                     share_tab, self.settings_tab):
             tab.configure(fg_color=COLOR_BG)
-        self.tabview.configure(command=self._place_settings_panel)
+        self.tabview.configure(command=self._on_tab_change)
 
         self._build_settings(board_tab)
         # Holder stays packed so the warning can appear above the sound
@@ -272,7 +272,22 @@ class Soundboard(DeviceMixin, MicHotkeyMixin, SoundListMixin, DownloadMixin, Edi
         else that wants to send someone to a setting."""
         self.tabview.set("Settings")
         # set() does not fire the tabview's own command, which is what
-        # would otherwise place the panel.
+        # would otherwise finish the switch.
+        self._on_tab_change()
+
+    def _on_tab_change(self, *_):
+        """Everything that has to happen when the open tab changes.
+
+        The lift is not cosmetic. CustomTkinter reveals a tab by gridding
+        it into the cell the old one already occupies and dropping the
+        old one - at once when the tab strip is clicked, 100 ms later
+        when set() is called - and Tk 9 on macOS does not repaint what
+        that uncovers. The tab you left stays painted over the one you
+        asked for: come back to the board and it is blank, correctly laid
+        out and entirely undrawn, until a resize forces a redraw. Raising
+        the tab draws it, which is the whole of what was missing.
+        """
+        self.tabview.tab(self.tabview.get()).lift()
         self._place_settings_panel()
 
     def _place_settings_panel(self, *_):
