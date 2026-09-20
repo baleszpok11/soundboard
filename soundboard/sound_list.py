@@ -42,6 +42,7 @@ from .dialogs import (
     warn,
 )
 from .dsp import match_gain, measure_file
+from .flow_row import FlowRow
 from .virtual_list import VirtualList
 from .theme import (
     CARD_BORDER,
@@ -792,19 +793,18 @@ class SoundListMixin:
         Its own row above the rest: the controls row was already as wide
         as the window, and these belong together anyway.
         """
-        frame = ctk.CTkFrame(parent, fg_color=COLOR_BG)
+        # Wraps for the same reason the controls row does: these seven
+        # want 671px and the 640px minimum window leaves 596.
+        frame = FlowRow(parent, fg_color=COLOR_BG)
         frame.pack(side="bottom", fill="x", padx=2, pady=(GAP, 0))
         flat = dict(fg_color=COLOR_ROW, hover_color=COLOR_ROW_HOVER, text_color=COLOR_TEXT,
                     border_width=1, border_color=COLOR_BORDER)
-        self.pause_button = ctk.CTkButton(
-            frame, text=PAUSE_TEXT, width=90, command=self.toggle_pause, **flat)
-        self.pause_button.pack(side="left")
-        ctk.CTkButton(
-            frame, text="Previous", width=80, command=self.play_previous, **flat,
-        ).pack(side="left", padx=(8, 0))
-        ctk.CTkButton(
-            frame, text="Next", width=70, command=self.play_next, **flat,
-        ).pack(side="left", padx=(8, 0))
+        self.pause_button = frame.add(ctk.CTkButton(
+            frame, text=PAUSE_TEXT, width=90, command=self.toggle_pause, **flat))
+        frame.add(ctk.CTkButton(
+            frame, text="Previous", width=80, command=self.play_previous, **flat))
+        frame.add(ctk.CTkButton(
+            frame, text="Next", width=70, command=self.play_next, **flat))
         self.continuous_checkbox = ctk.CTkCheckBox(
             frame, text="Continuous", command=self._on_toggle_continuous,
             fg_color=COLOR_ORANGE, hover_color=COLOR_ORANGE_HOVER,
@@ -812,7 +812,7 @@ class SoundListMixin:
         )
         if self.config.get("continuous_play"):
             self.continuous_checkbox.select()
-        self.continuous_checkbox.pack(side="left", padx=(12, 0))
+        frame.add(self.continuous_checkbox, gap=12)
 
         # The keys sit on the right of the same row, in the order the
         # buttons on the left are in.
@@ -822,9 +822,9 @@ class SoundListMixin:
             frame, text="", width=110, command=self.set_next_hotkey, **flat)
         self.pause_hotkey_button = ctk.CTkButton(
             frame, text="", width=110, command=self.set_pause_hotkey, **flat)
-        for button in (self.prev_hotkey_button, self.next_hotkey_button,
-                       self.pause_hotkey_button):
-            button.pack(side="right", padx=(8, 0))
+        for button in (self.pause_hotkey_button, self.next_hotkey_button,
+                       self.prev_hotkey_button):
+            frame.add(button, side="right")
         self._update_transport_hotkey_buttons()
 
     def _on_toggle_continuous(self):
@@ -930,46 +930,47 @@ class SoundListMixin:
         self.play_next(1, wrap=False)
 
     def _build_controls(self, parent):
-        frame = ctk.CTkFrame(parent, fg_color=COLOR_BG)
+        # A FlowRow, not a plain frame: these ask for more width than the
+        # default window has, and pack answers that by cutting the last
+        # of them up rather than by wrapping (see flow_row).
+        frame = FlowRow(parent, fg_color=COLOR_BG)
         frame.pack(side="bottom", fill="x", padx=2, pady=(GAP, 2))
-        ctk.CTkButton(
+        frame.add(ctk.CTkButton(
             frame, text="Add sound", command=self.add_sound,
             fg_color=COLOR_ORANGE, hover_color=COLOR_ORANGE_HOVER, text_color=COLOR_ON_ACCENT,
-        ).pack(side="left")
-        ctk.CTkButton(
+        ))
+        frame.add(ctk.CTkButton(
             frame, text="Add folder", command=self.add_folder,
             fg_color=COLOR_ROW, hover_color=COLOR_ROW_HOVER, text_color=COLOR_TEXT,
             border_width=1, border_color=COLOR_BORDER,
-        ).pack(side="left", padx=(8, 0))
-        self.record_button = ctk.CTkButton(
+        ))
+        self.record_button = frame.add(ctk.CTkButton(
             frame, text="Record", width=90, command=self.toggle_record,
             fg_color=COLOR_ROW, hover_color=COLOR_ROW_HOVER, text_color=COLOR_TEXT,
             border_width=1, border_color=COLOR_BORDER,
-        )
-        self.record_button.pack(side="left", padx=(8, 0))
-        ctk.CTkButton(
+        ))
+        frame.add(ctk.CTkButton(
             frame, text=f"Save last {REPLAY_S}s", width=110, command=self.save_replay,
             fg_color=COLOR_ROW, hover_color=COLOR_ROW_HOVER, text_color=COLOR_TEXT,
             border_width=1, border_color=COLOR_BORDER,
-        ).pack(side="left", padx=(8, 0))
-        ctk.CTkButton(
+        ))
+        frame.add(ctk.CTkButton(
             frame, text="Stop all", command=self.audio_engine.stop_all,
             fg_color=COLOR_ERROR, hover_color=COLOR_ERROR_HOVER, text_color=COLOR_ON_ERROR,
-        ).pack(side="left", padx=(8, 0))
-        self.stop_hotkey_button = ctk.CTkButton(
+        ))
+        self.stop_hotkey_button = frame.add(ctk.CTkButton(
             frame, text="", command=self.set_stop_hotkey,
             fg_color=COLOR_ROW, hover_color=COLOR_ROW_HOVER, text_color=COLOR_TEXT,
             border_width=1, border_color=COLOR_BORDER,
-        )
-        self.stop_hotkey_button.pack(side="left", padx=(8, 0))
+        ))
         self._update_stop_hotkey_button()
-        ctk.CTkButton(
+        self.dropout_label = frame.add(ctk.CTkLabel(
+            frame, text="", text_color=COLOR_TEXT_DIM), side="right")
+        frame.add(ctk.CTkButton(
             frame, text="Report a bug", width=110, command=self.report_bug,
             fg_color=COLOR_ROW, hover_color=COLOR_ROW_HOVER, text_color=COLOR_TEXT,
             border_width=1, border_color=COLOR_BORDER,
-        ).pack(side="right", padx=(8, 0))
-        self.dropout_label = ctk.CTkLabel(frame, text="", text_color=COLOR_TEXT_DIM)
-        self.dropout_label.pack(side="right")
+        ), side="right")
         self._update_dropout_label()
 
     # -- sound management -------------------------------------------------
