@@ -24,15 +24,27 @@ import os
 import subprocess
 import sys
 
+SCENARIO_TIMEOUT_S = 90
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))
 
 
 def run_one(name):
-    """Run a single scenario in a subprocess and report what it found."""
-    result = subprocess.run(
-        [sys.executable, os.path.abspath(__file__), "--child", name],
-        cwd=ROOT, capture_output=True, text=True)
+    """Run a single scenario in a subprocess and report what it found.
+
+    Under a timeout, because a layout that cannot settle does not crash -
+    it sits there redrawing, and without this the whole run waits for a
+    window nobody is looking at. A scenario that hangs is a failure like
+    any other, and a loud one.
+    """
+    try:
+        result = subprocess.run(
+            [sys.executable, os.path.abspath(__file__), "--child", name],
+            cwd=ROOT, capture_output=True, text=True, timeout=SCENARIO_TIMEOUT_S)
+    except subprocess.TimeoutExpired:
+        return 3, (f"  timed out after {SCENARIO_TIMEOUT_S}s - the window never "
+                   f"settled (a layout that reflows itself in a loop does this)")
     output = (result.stdout or "") + (result.stderr or "")
     return result.returncode, output
 
