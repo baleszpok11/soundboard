@@ -279,11 +279,30 @@ def apply(zip_path, relaunch=True, _program=None, _system=None):
     return program
 
 
+def child_environment():
+    """A copy of our environment with PyInstaller's onefile markers
+    removed.
+
+    A onefile bootloader unpacks the program into a temporary directory
+    and tells the Python process it starts where that is, through the
+    environment. Those variables are still set while we run, so a child
+    started from them believes it has already been unpacked and uses our
+    temporary directory instead of its own - which for the new build
+    means running the old build's files, until the old process exits and
+    deletes them underneath it.
+    """
+    env = dict(os.environ)
+    for name in list(env):
+        if name.startswith("_PYI_") or name == "_MEIPASS2":  # _MEIPASS2 predates PyInstaller 6
+            del env[name]
+    return env
+
+
 def relaunch_program(program, system=None):
     """Start the new build and leave. Detached, so it survives this
     process exiting."""
     system = system or platform.system()
-    kwargs = {"close_fds": True}
+    kwargs = {"close_fds": True, "env": child_environment()}
     if system == "Windows":
         kwargs["creationflags"] = 0x00000008 | 0x00000200  # DETACHED_PROCESS | NEW_PROCESS_GROUP
     else:

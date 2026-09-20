@@ -89,10 +89,15 @@ virtual audio cable.
   Linux renames the new binary over the old path (the running process
   keeps its inode); Windows moves the running .exe aside first, since it
   can be renamed but not written or deleted, and the leftover .old is
-  cleared on the next start; macOS only downloads and reveals, because
-  the .app is ad-hoc signed and a swapped-in copy can be quarantined out
-  of launching. APP_VERSION and the release tag must agree or the
-  comparison is meaningless, so CI fails a tag build when they do not
+  cleared on the next start. The restart goes through
+  child_environment(), which drops PyInstaller's _PYI_* markers: they
+  name the temporary folder this build was unpacked into, and a new
+  build that inherits them runs the old one's files until the old
+  process exits and deletes them. macOS only downloads and reveals,
+  because the .app is ad-hoc signed and a swapped-in copy can be
+  quarantined out of launching. APP_VERSION and the release tag must
+  agree or the comparison is meaningless, so CI fails a tag build when
+  they do not
 - Windows windows: win_window.py patches two CustomTkinter behaviours
   before the first window exists - it replaces every window's icon 200 ms
   after creation unless iconbitmap() was called (iconphoto, what Linux
