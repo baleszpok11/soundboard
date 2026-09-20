@@ -219,6 +219,31 @@ class Board:
             f"narrower than half the {viewport}px viewport "
             f"(widths {sorted(set(thin))}) - the list looks empty")
 
+    def expect_drawn(self, widget, label, least=3):
+        """That something was actually painted where this widget is.
+
+        The only check here that reads pixels, and it is deliberately the
+        coarsest one that can work: a rectangle of a single flat colour
+        means nothing was drawn, whatever the geometry says. It exists
+        because geometry cannot see a stale repaint - #156 left the board
+        correctly laid out and entirely undrawn, and all five scenarios
+        passed against a blank window.
+
+        Not a screenshot diff: no reference image, nothing to update when
+        a colour or a font changes. It only asks whether anything is
+        there at all.
+        """
+        if not widget.winfo_ismapped():
+            return True  # absence is expect_visible's business, not this
+        image = self._grab(widget)
+        if image is None:
+            return True  # no Pillow, or nothing to grab; not a failure
+        found = len(image.getcolors(maxcolors=1 << 16) or [])
+        return self.check(
+            found >= least,
+            f"{label} is laid out but not drawn: its {image.size[0]}x"
+            f"{image.size[1]} area has {found} distinct colour(s)")
+
     def snapshot(self):
         """Where everything on the board tab sits, for comparing a state
         against the same state later.
@@ -251,23 +276,31 @@ class Board:
         """A screenshot of the window, saved next to the run's output.
         Never an assertion - just what a human wants to see when one
         trips."""
+        image = self._grab(self.root)
+        if image is None:
+            return None
+        self._shots += 1
+        path = os.path.join(SHOT_DIR, f"{self._shots:02d}-{name}.png")
+        image.save(path)
+        return path
+
+    def _grab(self, widget):
+        """What is on the screen where `widget` is."""
         try:
             from PIL import ImageGrab
         except ImportError:
             return None
         self.root.update_idletasks()
-        self._shots += 1
-        x, y = self.root.winfo_rootx(), self.root.winfo_rooty()
-        width, height = self.root.winfo_width(), self.root.winfo_height()
+        width, height = widget.winfo_width(), widget.winfo_height()
+        if width < 2 or height < 2:
+            return None
+        x, y = widget.winfo_rootx(), widget.winfo_rooty()
         screen = ImageGrab.grab(xdisplay=os.environ.get("DISPLAY"))
         # Tk reports points and the grab comes back in pixels, which are
         # the same on X11 and not on a Retina screen.
         scale = screen.width / self.root.winfo_screenwidth()
-        box = tuple(round(edge * scale)
-                    for edge in (x, y, x + width, y + height))
-        path = os.path.join(SHOT_DIR, f"{self._shots:02d}-{name}.png")
-        screen.crop(box).save(path)
-        return path
+        return screen.crop(tuple(round(edge * scale)
+                                 for edge in (x, y, x + width, y + height)))
 
     # -- running ----------------------------------------------------------
 
