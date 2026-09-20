@@ -51,32 +51,34 @@ def nothing_is_clipped(board):
     yield
 
 
-def settings_disclosure(board):
-    """Open the disclosure on the Soundboard tab, then close it.
+def settings_button(board):
+    """The board's Settings button opens the settings tab.
 
-    Opening it must not take the board away - the panel is meant to
-    appear above the list, not instead of it - and closing it must put
-    everything back where it was.
+    It used to open the panel inline above the list, which unmapped the
+    board underneath it (#150). Whatever it does, the board has to be
+    intact when you come back to it.
     """
     before = board.snapshot()
-    board.shot("disclosure-closed")
+    board.shot("board-before-settings")
     yield
 
     board.click_settings()
     yield
-    board.shot("disclosure-open")
+    board.shot("settings-opened")
+    board.check(board.app.tabview.get() == "Settings",
+                "the Settings button did not open the settings")
     board.expect_visible(board.app.settings_panel, "settings panel")
-    for widget in board.widgets_below_settings():
-        board.expect_visible(widget, f"{type(widget).__name__} under the settings")
     yield
 
-    board.click_settings()
+    board.open_tab("Soundboard")
     yield
-    board.shot("disclosure-closed-again")
+    board.shot("board-after-settings")
     board.expect_hidden(board.app.settings_panel, "settings panel")
     board.expect_visible(board.list_frame, "sound list")
     board.expect_rows_full_width()
-    board.expect_restored(before, "closing the settings disclosure")
+    for widget in board.widgets_below_settings():
+        board.expect_visible(widget, f"{type(widget).__name__} on the board")
+    board.expect_restored(before, "a trip to the settings and back")
     yield
 
 
@@ -125,7 +127,7 @@ def search_and_clear(board):
 SCENARIOS = {
     "board_opens": board_opens,
     "nothing_is_clipped": nothing_is_clipped,
-    "settings_disclosure": settings_disclosure,
+    "settings_button": settings_button,
     "settings_tab_round_trip": settings_tab_round_trip,
     "search_and_clear": search_and_clear,
 }

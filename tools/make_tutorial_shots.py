@@ -160,12 +160,12 @@ def main():
     shoot(root, f"settings-{platform_name}",
           board.tabview._segmented_button, board.settings_button, pad=2)
 
-    # The settings panel is collapsed on the Soundboard tab, and a crop
-    # follows widget geometry: an unmapped panel has none to follow. The
-    # help talks the reader through the Soundboard tab, so open it there
-    # rather than shooting the Settings tab.
-    board.settings_open = True
-    board._place_settings_panel()
+    # A crop follows widget geometry and an unmapped panel has none to
+    # follow, so the panel has to be showing. Its tab is the only place
+    # it is shown now: the button on the Soundboard tab opens that tab
+    # rather than the panel, because the panel does not fit above a
+    # board (see _build_settings).
+    board.show_settings_tab()
     root.update()
 
     # The row labels say which dropdown is which, so they belong in the
