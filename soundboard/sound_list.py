@@ -389,14 +389,22 @@ class SoundListMixin:
         A cell is measured from a real slot rather than assumed, so a
         change of font or theme metric moves the rows with it."""
         grid = self.config["sound_view"] == "grid"
-        width = max(1, self.list_frame.viewport_width())
+        # The width is read after the measuring pass, not before it.
+        # _pitch_of() calls update_idletasks(), which is where Tk
+        # delivers the canvas's first <Configure> - and that re-enters
+        # this method through _on_list_resize with the real width. A
+        # width read before the measurement is stale by the time it is
+        # used, and overwrites the good one with the 1 an unmapped
+        # canvas reports, leaving every row a pixel wide.
         if grid:
-            self._grid_columns = self._grid_column_count()
             pitch_y = self._tile_pitch or self._measure_tile()
+            self._grid_columns = self._grid_column_count()
+            width = max(1, self.list_frame.viewport_width())
             self.list_frame.set_content(
                 len(self._visible), self._grid_columns, width // self._grid_columns, pitch_y)
         else:
             pitch_y = self._row_pitch or self._measure_row()
+            width = max(1, self.list_frame.viewport_width())
             self.list_frame.set_content(len(self._visible), 1, width, pitch_y)
 
     @staticmethod
