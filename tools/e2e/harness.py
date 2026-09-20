@@ -221,10 +221,20 @@ class Board:
 
     def snapshot(self):
         """Where everything on the board tab sits, for comparing a state
-        against the same state later."""
-        return {id(child): (child.winfo_x(), child.winfo_y(),
-                            bool(child.winfo_ismapped()))
-                for child in self.board_tab.winfo_children()}
+        against the same state later.
+
+        An unmapped widget keeps whatever coordinates it had when it was
+        last on screen, which are not a layout fact - a widget that was
+        never packed reads (0, 0) and the same widget after one round
+        trip reads wherever it went. Only its absence is compared.
+        """
+        state = {}
+        for child in self.board_tab.winfo_children():
+            if child.winfo_ismapped():
+                state[id(child)] = (True, child.winfo_x(), child.winfo_y())
+            else:
+                state[id(child)] = (False, None, None)
+        return state
 
     def expect_restored(self, before, label):
         """A reversible action must leave the board where it found it."""

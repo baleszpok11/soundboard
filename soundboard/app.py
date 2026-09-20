@@ -53,7 +53,6 @@ from .tutorial import TutorialWindow
 # Words, not a chevron: the tab strip and the buttons around this one are
 # text, and a glyph here would be the only one in the window.
 SETTINGS_SHOW = "Settings"
-SETTINGS_HIDE = "Settings (hide)"
 
 
 class Soundboard(DeviceMixin, MicHotkeyMixin, SoundListMixin, DownloadMixin, EditorMixin,
@@ -241,51 +240,54 @@ class Soundboard(DeviceMixin, MicHotkeyMixin, SoundListMixin, DownloadMixin, Edi
         threading.Thread(target=scipy_signal, daemon=True).start()
 
     def _build_settings(self, board_tab):
-        """The settings live in their own tab, and the Soundboard tab can
-        open the same panel under a button rather than always wearing it.
+        """The settings live in their own tab; this button on the board
+        is the way to them from here.
 
-        There is one panel, not two: a Tk widget has a single parent and
-        cannot be reparented, so a second copy would be a second set of
-        meters, device menus and hotkey buttons, and only one of them
-        would be kept up to date. The panel is parented to the window -
-        an ancestor of both homes - and shown in one or the other with
-        pack(in_=...).
+        It used to open the same panel inline, above the sound list, and
+        that cannot be made to work. The panel is about 620px tall and
+        the default window leaves the Soundboard tab about 630, so there
+        is no arrangement that shows both it and a board. Packed into the
+        tab it took the height it asked for and pack answered by
+        unmapping everything after it - the profile row, the search box
+        and the whole list - which is what #150 was. A scrolling box
+        around it does not help either: Tk clips a widget to its parent,
+        and the panel's parent is the window, so it draws straight over
+        the board whatever it is packed into.
+
+        There is still one panel, not two: a Tk widget has a single
+        parent and cannot be reparented, so a second copy would be a
+        second set of meters, device menus and hotkey buttons, and only
+        one of them would be kept up to date.
         """
-        self.settings_open = False
         self.settings_button = ctk.CTkButton(
-            board_tab, text=SETTINGS_SHOW, command=self._toggle_settings,
+            board_tab, text=SETTINGS_SHOW, command=self.show_settings_tab,
             anchor="w", fg_color=COLOR_ROW, hover_color=COLOR_ROW_HOVER,
             text_color=COLOR_TEXT, border_width=1, border_color=COLOR_BORDER,
         )
         self.settings_button.pack(fill="x", padx=2, pady=(2, 0))
         self.settings_panel = self._build_device_selectors(self.root)
-        # Not placed here: the panel opens above the warning holder, which
-        # the caller packs next.
 
-    def _toggle_settings(self):
-        self.settings_open = not self.settings_open
-        self.settings_button.configure(
-            text=SETTINGS_HIDE if self.settings_open else SETTINGS_SHOW)
+    def show_settings_tab(self):
+        """The board's Settings button, and the way back from anywhere
+        else that wants to send someone to a setting."""
+        self.tabview.set("Settings")
+        # set() does not fire the tabview's own command, which is what
+        # would otherwise place the panel.
         self._place_settings_panel()
 
     def _place_settings_panel(self, *_):
-        """Show the panel in whichever home should have it: its own tab
-        while that tab is open, the Soundboard tab while the disclosure
-        is open, and nowhere otherwise."""
+        """Show the panel while its tab is open, and nowhere otherwise.
+
+        Still placed rather than simply built into the tab: the panel is
+        parented to the window, because it was shown in two places once
+        and the meters inside it must not be built twice.
+        """
         panel = getattr(self, "settings_panel", None)
         if panel is None:
             return  # a tab change during startup, before the panel exists
-        on_settings_tab = self.tabview.get() == "Settings"
         panel.pack_forget()
-        if on_settings_tab:
+        if self.tabview.get() == "Settings":
             panel.pack(in_=self.settings_tab, fill="x", padx=2, pady=(2, GAP))
-        elif self.settings_open:
-            # Packed before the warning holder rather than inside a spare
-            # frame of its own: Tk keeps a pack master's requested size
-            # after its last slave leaves, so an empty holder would stay
-            # as tall as the panel and push the board down the window.
-            panel.pack(before=self.warning_holder, fill="x", padx=2,
-                       pady=(2, GAP))
 
     def _build_appearance_controls(self, frame, row):
         """Light/dark, or follow the OS. "System" is the default and is
