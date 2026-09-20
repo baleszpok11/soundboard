@@ -23,6 +23,7 @@ from .dialogs import ReportDialog, UpdateDialog, handle_exception, warn
 from .download_tab import DownloadMixin
 from .editor_tab import EditorMixin
 from .mic_hotkeys import MicHotkeyMixin
+from .remote import RemoteMixin
 from .share_tab import ShareMixin
 from .tts_tab import SpeechMixin
 from .sound_list import SoundListMixin
@@ -56,7 +57,7 @@ SETTINGS_SHOW = "Settings"
 
 
 class Soundboard(DeviceMixin, MicHotkeyMixin, SoundListMixin, DownloadMixin, EditorMixin,
-                 ShareMixin, SpeechMixin, TrayMixin):
+                 ShareMixin, SpeechMixin, TrayMixin, RemoteMixin):
     def __init__(self, root):
         self.root = root
         self.root.title("Soundboard")
@@ -183,6 +184,11 @@ class Soundboard(DeviceMixin, MicHotkeyMixin, SoundListMixin, DownloadMixin, Edi
             tab.configure(fg_color=COLOR_BG)
         self.tabview.configure(command=self._on_tab_change)
 
+        # Before the settings panel, so its switch shows what is really
+        # listening rather than what the config asked for: a port
+        # something else already has switches the setting back off.
+        remote_problem = self._start_remote()
+
         self._build_settings(board_tab)
         # Holder stays packed so the warning can appear above the sound
         # list, and it is what the settings panel opens above.
@@ -227,6 +233,8 @@ class Soundboard(DeviceMixin, MicHotkeyMixin, SoundListMixin, DownloadMixin, Edi
             self.measure_board()
         if self.config["close_to_tray"]:
             self._start_tray()
+        if remote_problem is not None:
+            warn(self.root, "Remote control", remote_problem)
         self._warm_filters()
 
     def _warm_filters(self):
@@ -428,6 +436,7 @@ class Soundboard(DeviceMixin, MicHotkeyMixin, SoundListMixin, DownloadMixin, Edi
             self.root.after_cancel(self._meter_poll)
             self._meter_poll = None
         self.audio_engine.stop()
+        self._stop_remote()
         if self.hotkey_listener is not None:
             self.hotkey_listener.stop()
         self._stop_tray()

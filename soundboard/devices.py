@@ -17,8 +17,9 @@ from .audio_engine import (
     sd,
     test_tone,
 )
-from .config import save_config
+from .config import REMOTE_PORT, save_config
 from .dsp import LOUDNESS_TARGET_LUFS, measure_loudness
+from .remote import HOST as REMOTE_HOST
 from .theme import (
     CARD_BORDER,
     COLOR_BG,
@@ -172,6 +173,7 @@ class DeviceMixin:
             border_width=CARD_BORDER, border_color=COLOR_BORDER,
         )
         frame.grid_columnconfigure(1, weight=1)
+        self._volume_rows = {}  # config key -> the widgets showing it
 
         ctk.CTkLabel(frame, text="Microphone (input):", text_color=COLOR_TEXT_DIM, font=font("small_bold")).grid(
             row=0, column=0, sticky="w", padx=8, pady=8
@@ -245,7 +247,8 @@ class DeviceMixin:
         self._build_stop_fade_controls(frame, 5)
         self._build_mic_controls(frame, 6)
         self._build_startup_controls(frame, 7)
-        self._build_appearance_controls(frame, 8)
+        self._build_remote_controls(frame, 8)
+        self._build_appearance_controls(frame, 9)
         return frame
 
     def _build_match_controls(self, frame, row):
@@ -465,21 +468,116 @@ class DeviceMixin:
         value_label = ctk.CTkLabel(
             frame, text=f"{self.config[config_key]}%", width=50,
             font=font("small"), text_color=COLOR_TEXT_DIM)
-
-        def on_change(value):
-            percent = int(round(value))
-            self.config[config_key] = percent
-            setattr(self.audio_engine, engine_attr, percent / 100)
-            value_label.configure(text=f"{percent}%")
-            self._save_config_soon()
-
         slider = ctk.CTkSlider(
-            frame, from_=0, to=VOLUME_MAX, number_of_steps=VOLUME_MAX, command=on_change,
+            frame, from_=0, to=VOLUME_MAX, number_of_steps=VOLUME_MAX,
+            command=lambda value: self.set_volume_percent(config_key, value),
             fg_color=COLOR_ROW, progress_color=COLOR_ORANGE, button_hover_color=COLOR_ORANGE_HOVER,
         )
         slider.set(self.config[config_key])
         slider.grid(row=row, column=1, sticky="ew", padx=8, pady=6)
         value_label.grid(row=row, column=2, sticky="w", padx=8, pady=6)
+        self._volume_rows[config_key] = (slider, value_label, engine_attr)
+
+    def set_volume_percent(self, config_key, value):
+        """Move a volume, from wherever it was moved: the slider itself,
+        or the remote control. Returns what it ended up at.
+
+        The slider is set here too, because a volume changed from
+        outside the window that left the slider where it was would be a
+        control that lies about its own setting."""
+        slider, value_label, engine_attr = self._volume_rows[config_key]
+        percent = max(0, min(VOLUME_MAX, int(round(value))))
+        self.config[config_key] = percent
+        setattr(self.audio_engine, engine_attr, percent / 100)
+        value_label.configure(text=f"{percent}%")
+        # CTkSlider.set() does not call the command, so this cannot come
+        # back round when the slider is what moved.
+        slider.set(percent)
+        self._save_config_soon()
+        return percent
+
+    def _build_remote_controls(self, frame, row):
+        """The local control channel: off, and a port.
+
+        The switch and the port are here rather than in remote.py so
+        that the command line side of that module stays free of
+        CustomTkinter - `soundboard --play Airhorn` should not build a
+        theme to send one line down a socket.
+        """
+        ctk.CTkLabel(frame, text="Remote control:", text_color=COLOR_TEXT_DIM,
+                     font=font("small_bold")).grid(
+            row=row, column=0, sticky="w", padx=8, pady=6)
+        box = ctk.CTkFrame(frame, fg_color="transparent")
+        box.grid(row=row, column=1, columnspan=2, sticky="ew", padx=8, pady=6)
+        self.remote_checkbox = ctk.CTkCheckBox(
+            box, text="Let other programs on this computer control the board",
+            command=self._on_toggle_remote,
+            fg_color=COLOR_ORANGE, hover_color=COLOR_ORANGE_HOVER,
+            checkmark_color=COLOR_ON_ACCENT, text_color=COLOR_TEXT,
+        )
+        if self.config.get("remote_control"):
+            self.remote_checkbox.select()
+        self.remote_checkbox.grid(row=0, column=0, sticky="w")
+        ctk.CTkLabel(box, text="Port:", text_color=COLOR_TEXT_DIM,
+                     font=font("small")).grid(row=0, column=1, sticky="w", padx=(12, 4))
+        self.remote_port_entry = ctk.CTkEntry(box, width=70, fg_color=COLOR_ROW,
+                                              text_color=COLOR_TEXT)
+        self.remote_port_entry.insert(0, str(self.config.get("remote_port", REMOTE_PORT)))
+        # Both, because there is no OK button here: typing a port and
+        # clicking away should apply it as surely as pressing Return.
+        self.remote_port_entry.bind("<Return>", self._on_remote_port)
+        self.remote_port_entry.bind("<FocusOut>", self._on_remote_port)
+        self.remote_port_entry.grid(row=0, column=2, sticky="w")
+        self.remote_status = ctk.CTkLabel(
+            box, text="", text_color=COLOR_TEXT_DIM, font=font("small"),
+            anchor="w", justify="left")
+        self.remote_status.grid(row=1, column=0, columnspan=3, sticky="w", pady=(4, 0))
+        self._update_remote_status()
+
+    def _update_remote_status(self, message=None):
+        server = getattr(self, "remote_server", None)
+        if message is None and server is not None:
+            message = (f"Listening on {REMOTE_HOST}:{server.port} - this "
+                       f"computer only, never the network.")
+        elif message is None:
+            message = ("Off. Switch on to drive the board from a Stream Deck, "
+                       "a script, or soundboard --play <name>.")
+        self.remote_status.configure(text=message)
+
+    def _on_toggle_remote(self):
+        self.config["remote_control"] = bool(self.remote_checkbox.get())
+        problem = self._start_remote()
+        if problem is not None:
+            # _start_remote switched it back off; the checkbox has to
+            # follow, or it claims something that is not running.
+            self.remote_checkbox.deselect()
+            error(self.root, "Remote control", problem)
+        save_config(self.config)
+        self._update_remote_status()
+
+    def _on_remote_port(self, _event=None):
+        """A port that is not a port is refused and the box put back,
+        rather than saved and silently ignored at the next start."""
+        text = self.remote_port_entry.get().strip()
+        current = self.config.get("remote_port", REMOTE_PORT)
+        if text.isdigit() and 1024 <= int(text) <= 65535:
+            port = int(text)
+        else:
+            port = current
+            if text != str(current):
+                self._update_remote_status(
+                    "A port is a number from 1024 to 65535.")
+        self.remote_port_entry.delete(0, "end")
+        self.remote_port_entry.insert(0, str(port))
+        if port == current:
+            return
+        self.config["remote_port"] = port
+        save_config(self.config)
+        problem = self._start_remote()  # moves a running channel across
+        if problem is not None:
+            self.remote_checkbox.deselect()
+            error(self.root, "Remote control", problem)
+        self._update_remote_status()
 
     def _refresh_device_menus(self):
         for menu, var, devices, key in (

@@ -1,5 +1,6 @@
 soundboard_config.json
 Sounds/
+Backups/
 __pycache__/
 *.pyc
 .venv/

@@ -63,6 +63,10 @@ APP_VERSION = "0.12.0"  # bump before tagging a release; CI checks the tag match
 # sound that predates the volume key still loads at 100 (see _load_sound).
 NEW_SOUND_VOLUME = 20
 DEFAULT_PROFILE = "Default"
+# Where the local control channel listens when it is switched on. Only a
+# default: it is a config key, because whatever is on a machine's 8767
+# was there first. See remote.py.
+REMOTE_PORT = 8767
 APP_DIR = _data_dir()
 CONFIG_PATH = os.path.join(APP_DIR, "soundboard_config.json")
 SOUNDS_DIR = os.path.join(APP_DIR, "Sounds")
@@ -199,6 +203,11 @@ def prepare_config(config):
     config.setdefault("next_hotkey", None)
     config.setdefault("prev_hotkey", None)
     config.setdefault("close_to_tray", False)
+    # The local control channel, so a Stream Deck or a script can fire a
+    # sound. Off until it is switched on, and loopback only whatever it
+    # is set to - see remote.py.
+    config.setdefault("remote_control", False)
+    config.setdefault("remote_port", REMOTE_PORT)
     config.setdefault("check_for_updates", True)
     # "system", "light" or "dark"; "system" follows the OS on
     # Windows and macOS and falls back to light elsewhere.

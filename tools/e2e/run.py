@@ -62,7 +62,10 @@ def child(name):
     # width-dependent - a row that fails to lay out at one size quietly
     # rights itself at another - so the size is part of the test.
     scenario = SCENARIOS[name]
-    board = Board(geometry=getattr(scenario, "geometry", None) or Board.GEOMETRY)
+    board = Board(geometry=getattr(scenario, "geometry", None) or Board.GEOMETRY,
+                  # A setting the app reads at startup has to be in the
+                  # file before it opens (`scenario.settings`).
+                  settings=getattr(scenario, "settings", None))
     try:
         failures = board.run(scenario)
     except Exception as error:
@@ -78,6 +81,10 @@ def child(name):
 
 def main():
     sys.path.insert(0, HERE)
+    # The scenarios import from the app package (the only way to import
+    # it - bare imports make a second, unrelated copy of every class),
+    # and listing them imports the module here as well as in the child.
+    sys.path.insert(0, ROOT)
     args = sys.argv[1:]
     if args and args[0] == "--child":
         return child(args[1])
