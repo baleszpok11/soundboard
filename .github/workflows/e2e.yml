@@ -1,0 +1,56 @@
+name: End-to-end scenarios
+
+# tools/e2e/run.py opens a real window against a throwaway config and
+# asserts on what it lays out. Run it here so a board that stops drawing
+# is reported by CI rather than by whoever opens the app next.
+
+on:
+  push:
+    branches:
+      - master
+  pull_request: {}
+  workflow_dispatch: {}
+
+concurrency:
+  group: e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  scenarios:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Tk, a virtual display and PortAudio
+        # python3-tk brings the Tcl/Tk libraries setup-python's build links
+        # against; sounddevice does not bundle PortAudio and fails at import
+        # without libportaudio2.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3-tk xvfb libportaudio2
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run the scenarios
+        # The runner has no sound card, which the app is meant to survive:
+        # it opens with an empty device list and says so. Screenshots go
+        # into the workspace (the harness uses a temporary directory, and
+        # TMPDIR is how it is told where) so a failure can upload them.
+        run: |
+          mkdir -p e2e-tmp
+          TMPDIR="$GITHUB_WORKSPACE/e2e-tmp" \
+            xvfb-run -a -s "-screen 0 1280x1024x24" python tools/e2e/run.py
+
+      - name: Upload the screenshots a failure left behind
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-screenshots
+          path: e2e-tmp/**/shots
+          if-no-files-found: ignore

@@ -303,7 +303,12 @@ virtual audio cable.
 - End-to-end tests: tools/e2e/run.py builds a real window against a
   temporary config and Sounds/ and asserts on what it lays out. Needs a
   display (xvfb-run on Linux); exit code is the number of failed
-  scenarios. A scenario is a generator that yields between steps, and
+  scenarios, which is how e2e.yml gates every push and pull request. The
+  runner has no sound card, so the harness answers message boxes rather
+  than letting one stop the run: a box spins its own event loop until
+  somebody clicks it, and playing a clip with no output device opens
+  one. What it said is kept (board.dialogs) and printed under a
+  failure. A scenario is a generator that yields between steps, and
   the steps run as after() callbacks inside a real mainloop() - drive Tk
   by pumping update() by hand instead and rows go unrendered and
   positions come back that the running app never has, which invents

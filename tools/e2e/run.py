@@ -75,6 +75,12 @@ def child(name):
     for failure in failures:
         print(f"  {failure}")
     if failures:
+        # What the app tried to say in a message box, which the harness
+        # answered rather than let it stop the run. Often the whole
+        # explanation: a machine with no sound card fails a scenario
+        # about playing and says so here.
+        for _, title, message in board.dialogs:
+            print(f"  a message box said {title}: {message}")
         print(f"  screenshots: {SHOT_DIR}")
     return 1 if failures else 0
 

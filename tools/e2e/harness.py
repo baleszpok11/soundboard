@@ -41,6 +41,7 @@ import struct
 import sys
 import tempfile
 import wave
+from tkinter import messagebox
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(
     os.path.abspath(__file__)))))
@@ -61,6 +62,29 @@ from soundboard.app import Soundboard  # noqa: E402
 from soundboard.theme import set_appearance  # noqa: E402
 
 SHOT_DIR = os.path.join(_WORK, "shots")
+
+# A message box stops the run dead: it spins its own event loop until
+# someone clicks it, and nobody is there to. They are answered here
+# instead and kept, so a machine with no sound card - where playing a
+# clip reports one - runs the suite rather than hanging on it, and so a
+# scenario can ask what the app said (`board.dialogs`).
+DIALOG_REPLIES = {"showinfo": "ok", "showwarning": "ok", "showerror": "ok",
+                  "askyesno": False, "askokcancel": False,
+                  "askretrycancel": False, "askyesnocancel": None,
+                  "askquestion": "no"}
+
+DIALOGS = []
+
+
+def _answer_message_boxes():
+    for name, reply in DIALOG_REPLIES.items():
+        def answer(title=None, message=None, _name=name, _reply=reply, **rest):
+            DIALOGS.append((_name, title, message))
+            return _reply
+        setattr(messagebox, name, answer)
+
+
+_answer_message_boxes()
 
 # A tick long enough for Tk to have settled after a step. Anything that
 # needs longer than this is a finding in itself: the app is meant to
@@ -124,6 +148,7 @@ class Board:
         make_board_files(sounds, appearance, settings)
         os.makedirs(SHOT_DIR, exist_ok=True)
         self.failures = []
+        self.dialogs = DIALOGS
         self.root = ctk.CTk()
         self.root.geometry(geometry)
         self.app = Soundboard(self.root)
