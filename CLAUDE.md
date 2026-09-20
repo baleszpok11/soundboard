@@ -257,6 +257,22 @@ virtual audio cable.
   backend as a data file that never gets analysed, so Xlib is left out
 - macOS dev: use Homebrew python@3.12 + python-tk@3.12 (Apple's CLT
   Python ships Tk 8.5, which renders blank windows)
+- Organising a board: the per-sound fields "favourite", "category",
+  "colour", "plays", "last_played" and "added" are all optional and all
+  defaulted in config._load_sound, and none of them affect what a sound
+  plays - an older Soundboard opening a newer board ignores every one
+  and still plays it, the rule "paths" already follows. Categories are
+  derived from the sounds (SoundListMixin.categories()) rather than
+  stored, so a category exists exactly while something is in it and
+  there is no second list to keep in step. Filtering and sorting both
+  live in _visible_sounds, which returns (profile index, sound) pairs -
+  the index is the sound's place in the profile, never its place on
+  screen, so sorting cannot change what a row plays. Dragging only
+  reorders while the board is showing everything in its own order
+  (_can_reorder). "colour" is a TILE_COLOURS name, not a hex: raw hex
+  picked once is unreadable in one of the two appearance modes, and an
+  unknown name falls back to the plain tile. Play counts are written
+  through _save_config_soon, the same debounce the sliders use
 - End-to-end tests: tools/e2e/run.py builds a real window against a
   temporary config and Sounds/ and asserts on what it lays out. Needs a
   display (xvfb-run on Linux); exit code is the number of failed
@@ -269,7 +285,12 @@ virtual audio cable.
   geometry is stable across machines and says what is wrong. Screenshots
   are saved on a failure as evidence for a human, never as the check.
   Each scenario runs in its own subprocess, since Tk does not reliably
-  survive a second root window in one interpreter
+  survive a second root window in one interpreter. A scenario can pin
+  the window size it needs (`scenario.geometry`): layout bugs are often
+  width-dependent and right themselves at another size. Import app
+  classes through the package (`from soundboard.flow_row import
+  FlowRow`) - imported bare they are a second, unrelated class object
+  and every isinstance check is quietly False
 
 ## Constraints
 - Everything free and open-source. No paywalled dependencies or services.

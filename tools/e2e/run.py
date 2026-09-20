@@ -58,9 +58,13 @@ def child(name):
     if name not in SCENARIOS:
         print(f"unknown scenario {name!r}")
         return 2
-    board = Board()
+    # A scenario can pin the window it wants. Layout bugs are often
+    # width-dependent - a row that fails to lay out at one size quietly
+    # rights itself at another - so the size is part of the test.
+    scenario = SCENARIOS[name]
+    board = Board(geometry=getattr(scenario, "geometry", None) or Board.GEOMETRY)
     try:
-        failures = board.run(SCENARIOS[name])
+        failures = board.run(scenario)
     except Exception as error:
         print(f"  the scenario raised {type(error).__name__}: {error}")
         print(f"  screenshots: {SHOT_DIR}")
