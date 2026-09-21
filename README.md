@@ -98,6 +98,23 @@ no Python or setup required, just download and run. Windows, macOS, and
 Linux builds are published automatically for each tagged version (see
 [Building a standalone executable](#building-a-standalone-executable)).
 
+### Opening it the first time on macOS
+
+The macOS build is signed ad-hoc rather than notarized — notarization
+costs $99/year, which this project's free-and-open-source rule rules
+out — so Gatekeeper blocks it the first time. Right-click the app in
+Finder and choose Open, then Open again in the dialog. If the dialog
+only offers OK, the app is quarantined and has to be cleared from the
+terminal:
+
+```
+xattr -dr com.apple.quarantine /Applications/soundboard.app
+```
+
+(Point it at wherever you put the app.) This applies to each new
+version you download in a browser; the in-app updater fetches without
+a browser, so what it downloads is not quarantined.
+
 ## Running from source
 
 Requirements: Python 3.9+ with a current Tk. On macOS, the Python that
@@ -558,8 +575,9 @@ native executable for it (PyInstaller does not cross-compile). The
 extractors and a portable ffmpeg. On macOS, the `plutil` line is required
 for microphone access, and the app has to be re-signed after editing it.
 
-The macOS build is not notarized, so on first launch right-click the app
-and choose Open.
+A build of your own is ad-hoc signed too, so it needs the same
+first-launch step as a downloaded one: see [Opening it the first time on
+macOS](#opening-it-the-first-time-on-macos).
 
 ### Publishing a release
 
