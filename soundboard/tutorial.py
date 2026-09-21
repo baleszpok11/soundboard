@@ -146,6 +146,14 @@ PAGES = {
          "Device to BlackHole 2ch. Leave Output Device as your headphones."),
         ("warn", _FEEDBACK),
         ("shot", "feedback-macos", "The warning Soundboard shows when it spots it."),
+        ("text",
+         "Soundboard is signed ad-hoc rather than notarized, so macOS "
+         "blocks each copy you download in a browser the first time you "
+         "open it - this version and every update. Right-click the app in "
+         "Finder and choose Open, then Open again in the dialog. If the "
+         "dialog only offers OK, the download is quarantined; clear it in "
+         "Terminal and open the app normally:"),
+        ("code", "xattr -dr com.apple.quarantine /Applications/soundboard.app"),
     ],
     LINUX: [
         ("text",
