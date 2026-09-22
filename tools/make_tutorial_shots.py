@@ -35,6 +35,7 @@ config.SOUNDS_DIR = os.path.join(_WORK, "Sounds")
 os.makedirs(config.SOUNDS_DIR, exist_ok=True)
 
 import customtkinter as ctk  # noqa: E402
+from soundboard import devices  # noqa: E402
 from soundboard.app import Soundboard  # noqa: E402
 from soundboard.theme import set_appearance  # noqa: E402
 
@@ -60,6 +61,13 @@ DEVICES = {
                 "CABLE Input (VB-Audio Virtual Cable)"),
     "macos": ("MacBook Pro Microphone", "BlackHole 2ch"),
     "linux": ("pulse", "pulse"),
+}
+# The cable each platform is told to install, as devices.CABLE_INSTALL
+# spells it - keyed by platform name here rather than by sys.platform,
+# since these shots are taken for a platform this machine is not.
+CABLE_INSTALL = {
+    "windows": devices.CABLE_INSTALL["win32"],
+    "macos": devices.CABLE_INSTALL["darwin"],
 }
 # An input that carries what the PC plays rather than a real microphone,
 # as each platform spells it. devices.LOOPBACK_INPUT_HINTS has to match
@@ -159,6 +167,28 @@ def main():
     # crops a slice of the profile row into the shot.
     shoot(root, f"settings-{platform_name}",
           board.tabview._segmented_button, board.settings_button, pad=2)
+
+    # The warning the app raises by itself while no virtual cable is
+    # installed, which is the picture for the step that tells people to
+    # install one. Linux has none: its cable is a PulseAudio null sink
+    # that PortAudio never lists, so devices.CABLE_INSTALL leaves it out
+    # and the warning cannot appear there.
+    # _missing_cable_install reads sys.platform, which is this machine
+    # and not the platform being shot, so the answer is supplied here the
+    # way the device lists are. It is patched rather than the warning
+    # being filled in directly because the one-second health tick calls
+    # it again and would hide the frame between the patch and the grab.
+    install = CABLE_INSTALL.get(platform_name)
+    if install is not None:
+        board._missing_cable_install = lambda: install
+        board._update_device_warnings()
+        # The label and the button rather than the frame around them:
+        # the frame fills the window, and the empty width past the
+        # button is dead space the help would scale the words down for.
+        shoot(root, f"cable-{platform_name}",
+              board.cable_warning_label, board.cable_warning_button, pad=6)
+        board._missing_cable_install = lambda: None
+        board._update_device_warnings()
 
     # A crop follows widget geometry and an unmapped panel has none to
     # follow, so the panel has to be showing. Its tab is the only place
