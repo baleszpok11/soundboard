@@ -496,6 +496,79 @@ remote_control.settings = {"remote_control": True, "remote_port": _free_port()}
 # wraps, a second <Configure> arrives and lays out whatever was missing.
 nothing_is_clipped.geometry = "1000x760+40+40"
 
+def _menu_entry(board, open_menu, label):
+    """Open a sound's menu the way a right-click does and invoke one of
+    its entries. tk_popup is swapped for a recorder, so no menu is ever
+    posted for the harness to have to dismiss."""
+    import tkinter as tk
+    posted = []
+    real = tk.Menu.tk_popup
+    tk.Menu.tk_popup = lambda menu, *a, **k: posted.append(menu)
+    try:
+        open_menu()
+    finally:
+        tk.Menu.tk_popup = real
+    if not posted:
+        board.fail("the sound menu did not open")
+        return False
+    menu = posted[-1]
+    entries = {menu.entrycget(i, "label"): i for i in range(menu.index("end") + 1)
+               if menu.type(i) not in ("separator", "tearoff")}
+    if label not in entries:
+        board.fail(f"the sound menu has no {label!r}: {list(entries)}")
+        return False
+    menu.invoke(entries[label])
+    return True
+
+
+def preview_sound(board):
+    """Preview, from a row and from a tile, plays to the monitor alone.
+
+    The runner has no sound card, so both streams are stand-ins: all the
+    engine checks when it queues a clip is whether each one exists.
+    Nothing mixes, so a clip stays queued until it is stopped.
+    """
+    import time
+    import types
+    from soundboard.sound_list import PREVIEW_KEY
+    app = board.app
+    anchor = types.SimpleNamespace(x_root=0, y_root=0)  # where a right-click landed
+    engine = app.audio_engine
+    # The device watchdog reads .active once a second.
+    engine.output_stream = types.SimpleNamespace(active=True)
+    engine.monitor_stream = types.SimpleNamespace(active=True)
+    try:
+        for view in ("List", "Grid"):
+            app._on_view_change(view)
+            yield
+            target = app.sounds[1]
+            plays = int(target.get("plays") or 0)
+            opened = _menu_entry(
+                board, lambda: app._show_sound_menu(anchor, 1, from_tile=view == "Grid"),
+                "Preview")
+            yield
+            if not opened:
+                return
+            deadline = time.monotonic() + 5
+            while PREVIEW_KEY not in engine.active_keys() and time.monotonic() < deadline:
+                yield
+            board.check(PREVIEW_KEY in engine.active_keys(),
+                        f"{view}: Preview did not reach the monitor")
+            board.check(not any(s.key == PREVIEW_KEY for s in engine._active_sounds),
+                        f"{view}: Preview went down the cable")
+            board.check(app._sound_key(target) not in engine.active_keys(),
+                        f"{view}: a preview showed the row as playing")
+            board.check(int(target.get("plays") or 0) == plays,
+                        f"{view}: a preview counted as a play")
+            _menu_entry(board, lambda: app._show_sound_menu(anchor, 1), "Stop preview")
+            yield
+            board.check(PREVIEW_KEY not in engine.active_keys(),
+                        f"{view}: Stop preview left it playing")
+    finally:
+        engine.stop_all()
+        engine.output_stream = engine.monitor_stream = None
+
+
 SCENARIOS = {
     "board_opens": board_opens,
     "nothing_is_clipped": nothing_is_clipped,
@@ -505,4 +578,5 @@ SCENARIOS = {
     "organising_the_board": organising_the_board,
     "colours_and_defaults": colours_and_defaults,
     "remote_control": remote_control,
+    "preview_sound": preview_sound,
 }

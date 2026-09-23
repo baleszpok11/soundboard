@@ -78,6 +78,7 @@ _length_cache = {}  # (path, mtime, size) -> "m:ss", so a redraw doesn't re-read
 AUDIO_EXTENSIONS = (".wav", ".flac", ".ogg", ".mp3")
 IMPORT_REPORT_NAMES = 10  # names listed before the rest are counted
 ALL_CATEGORIES = "All"  # the filter's own entry, never a category name
+PREVIEW_KEY = "sound-preview"  # never a path, so never an entry's own key
 _UNSET = object()  # "no argument", where None is a real one
 # The sorts offered, config value -> what the menu says. "custom" is the
 # order the sounds are in, which is what dragging a row rearranges.
@@ -871,6 +872,10 @@ class SoundListMixin:
         if from_tile:
             menu.add_command(label="Set hotkey...", command=lambda: self.set_hotkey(index))
             menu.add_command(label="Volume...", command=lambda: self.set_volume(index))
+        menu.add_command(label="Preview", command=lambda: self.preview_sound(sound))
+        if PREVIEW_KEY in self.audio_engine.active_keys():
+            menu.add_command(label="Stop preview",
+                             command=lambda: self.audio_engine.stop_key(PREVIEW_KEY))
         menu.add_command(
             label="Stop", command=lambda: self.stop_sound(sound),
             state="normal" if self._sound_key(sound) in self.audio_engine.active_keys() else "disabled",
@@ -1620,6 +1625,17 @@ class SoundListMixin:
             resolve_sound_path(path),
             gain=self._clip_gain(sound, path), loop=sound.get("loop", False), key=key,
             fades=Fades(**sound_fades(sound)),
+        )
+
+    def preview_sound(self, sound):
+        """Play an entry to the monitor alone, never down the cable: a
+        check of the next cue, not a play. So it is not counted, does not
+        move Next/Previous, and plays under its own key - one preview at a
+        time, and the row does not show as playing to everyone."""
+        path = self._pick_clip(sound, self._sound_key(sound))
+        self.audio_engine.play(
+            resolve_sound_path(path), gain=self._clip_gain(sound, path),
+            key=PREVIEW_KEY, fades=Fades(**sound_fades(sound)), local_only=True,
         )
 
     def _pick_clip(self, sound, key):
