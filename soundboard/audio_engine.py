@@ -1169,28 +1169,29 @@ class AudioEngine:
                 # one now, so it is played anyway.
                 self._active_sounds_monitor.append(_ActiveSound(monitor_data, key, gain, loop, fades))
 
-    def play(self, path, gain=1.0, loop=False, key=None, fades=NO_FADES):
+    def play(self, path, gain=1.0, loop=False, key=None, fades=NO_FADES, local_only=False):
         """Queue a file for playback without blocking the caller. Errors
         are reported through on_error. `key` identifies what is playing
         for stopping and restarting; it defaults to the file, which a
         board entry that can play several files overrides so all of them
-        answer to the one entry."""
-        self._requests.put((path, gain, True, loop, key, fades))
+        answer to the one entry. `local_only` is as for play_data()."""
+        self._requests.put((path, gain, True, loop, key, fades, local_only))
 
     def preload(self, paths):
         """Decode files into the cache in the background."""
         for path in paths:
-            self._requests.put((path, 1.0, False, False, None, NO_FADES))
+            self._requests.put((path, 1.0, False, False, None, NO_FADES, False))
 
     def _worker(self):
         while True:
-            path, gain, play, loop, key, fades = self._requests.get()
+            path, gain, play, loop, key, fades, local_only = self._requests.get()
             try:
                 if play and self.output_stream is None and self.monitor_stream is None:
                     raise RuntimeError("No output device selected.")
                 data = self._load_clip(path)
                 if play:
-                    self._queue_clip(data, key or os.path.abspath(path), gain, loop, fades)
+                    self._queue_clip(data, key or os.path.abspath(path), gain, loop, fades,
+                                     local_only=local_only)
             except FileNotFoundError:
                 if play and self.on_error is not None:
                     self.on_error(f"File not found: {path}")
