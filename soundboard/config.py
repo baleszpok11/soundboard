@@ -170,6 +170,9 @@ def prepare_config(config):
     config.setdefault("hear_self", True)
     config.setdefault("mic_volume", 100)
     config.setdefault("sound_volume", 100)
+    # The monitor used to play at the soundboard volume, so a board from
+    # before it had its own starts where it was rather than at 100.
+    config.setdefault("monitor_volume", config["sound_volume"])
     config.setdefault("stop_hotkey", None)
     config.setdefault("mic_muted", False)
     config.setdefault("mute_hotkey", None)

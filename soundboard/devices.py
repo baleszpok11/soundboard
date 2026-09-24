@@ -243,12 +243,13 @@ class DeviceMixin:
 
         self._add_volume_row(frame, 2, "Mic volume:", "mic_volume", "mic_gain")
         self._add_volume_row(frame, 3, "Soundboard volume:", "sound_volume", "sound_gain")
-        self._build_match_controls(frame, 4)
-        self._build_stop_fade_controls(frame, 5)
-        self._build_mic_controls(frame, 6)
-        self._build_startup_controls(frame, 7)
-        self._build_remote_controls(frame, 8)
-        self._build_appearance_controls(frame, 9)
+        self._add_volume_row(frame, 4, "Monitor volume:", "monitor_volume", "monitor_gain")
+        self._build_match_controls(frame, 5)
+        self._build_stop_fade_controls(frame, 6)
+        self._build_mic_controls(frame, 7)
+        self._build_startup_controls(frame, 8)
+        self._build_remote_controls(frame, 9)
+        self._build_appearance_controls(frame, 10)
         return frame
 
     def _build_match_controls(self, frame, row):
@@ -616,6 +617,7 @@ class DeviceMixin:
             monitor_device = None
         self.audio_engine.mic_gain = self.config["mic_volume"] / 100
         self.audio_engine.sound_gain = self.config["sound_volume"] / 100
+        self.audio_engine.monitor_gain = self.config["monitor_volume"] / 100
         self.audio_engine.stop_fade_s = self._stop_fade_seconds()
         self.audio_engine.start(input_device, output_device, monitor_device)
         self.audio_engine.set_monitor_muted(not self.config.get("hear_self", True))

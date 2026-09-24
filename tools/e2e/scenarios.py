@@ -569,6 +569,62 @@ def preview_sound(board):
         engine.output_stream = engine.monitor_stream = None
 
 
+def monitor_volume(board):
+    """The monitor has its own volume: the slider reaches the engine, and
+    a clip is as loud on the monitor as that says, whatever the
+    soundboard volume is. A board from before the setting starts it at
+    the soundboard volume, which is what it played at until now.
+
+    The streams are stand-ins, as in preview_sound; the two callbacks are
+    called by hand, which is what a sound card would do with them.
+    """
+    import types
+    import numpy as np
+    app = board.app
+    engine = app.audio_engine
+    board.check(app.config["monitor_volume"] == 40,
+                f"an older board's monitor started at {app.config['monitor_volume']}%, "
+                "not at its soundboard volume of 40%")
+    board.check(abs(engine.monitor_gain - 0.4) < 1e-6,
+                f"the engine's monitor gain at startup is {engine.monitor_gain}")
+    board.open_tab("Settings")
+    yield
+    board.expect_visible(app._volume_rows["monitor_volume"][0], "the monitor volume slider")
+    board.shot("monitor-volume")
+    yield
+
+    app.set_volume_percent("sound_volume", 20)
+    app.set_volume_percent("monitor_volume", 80)
+    board.check(abs(engine.monitor_gain - 0.8) < 1e-6 and abs(engine.sound_gain - 0.2) < 1e-6,
+                f"sliders reached the engine as sound {engine.sound_gain}, "
+                f"monitor {engine.monitor_gain}")
+    yield
+
+    engine.output_stream = types.SimpleNamespace(active=True)
+    engine.monitor_stream = types.SimpleNamespace(active=True)
+    try:
+        frames = 256
+        clip = np.full((frames * 4, 2), 0.5, dtype=np.float32)
+        engine.play_data(clip, 48000, key="monitor-volume-test")
+        out = np.zeros((frames, engine.output_channels), dtype=np.float32)
+        monitor = np.zeros((frames, engine.monitor_channels), dtype=np.float32)
+        engine._on_output(out, frames, None, None)
+        engine._on_monitor_output(monitor, frames, None, None)
+        # The mic is silent on a runner with no input, so the cable
+        # carries the clip alone.
+        board.check(abs(float(out[-1, 0]) - 0.5 * 0.2) < 1e-3,
+                    f"the cable got {float(out[-1, 0]):.3f}, not the clip at the soundboard volume")
+        board.check(abs(float(monitor[-1, 0]) - 0.5 * 0.8) < 1e-3,
+                    f"the monitor got {float(monitor[-1, 0]):.3f}, not the clip at the monitor volume")
+    finally:
+        engine.stop_all()
+        engine.output_stream = engine.monitor_stream = None
+    yield
+
+
+monitor_volume.settings = {"sound_volume": 40}
+
+
 SCENARIOS = {
     "board_opens": board_opens,
     "nothing_is_clipped": nothing_is_clipped,
@@ -579,4 +635,5 @@ SCENARIOS = {
     "colours_and_defaults": colours_and_defaults,
     "remote_control": remote_control,
     "preview_sound": preview_sound,
+    "monitor_volume": monitor_volume,
 }
