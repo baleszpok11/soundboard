@@ -208,14 +208,24 @@ virtual audio cable.
 - Errors: Tk callback errors and startup failures show a dialog and append
   to soundboard_error.log; config writes are atomic
 - Local playback: play_data(local_only=True) queues a clip to the monitor
-  alone, which is what the editor's Preview uses - without it everyone in
-  the call hears every pass over the same four seconds. With no monitor
-  stream it falls back to the output, because that case is exactly "the
-  output device is the system default", so it is the local device
-  anyway. A local clip ignores monitor_muted: that setting keeps the
+  alone, which is what the editor's Preview and a sound's own Preview
+  use - without it everyone in the call hears every pass over the same
+  four seconds. With no monitor stream it falls back to the output,
+  which is the one case where local playback is audible on the cable;
+  devices._monitor_device() is what decides there is no monitor, and it
+  says so in the device warnings rather than leaving it to be
+  discovered. A local clip ignores monitor_muted: that setting keeps the
   board out of your headphones, and pressing Preview is asking to hear
   this one. The Test tone and the Speak tab are meant to reach the
   cable and still do
+- The monitor's device is config "preview_device", None meaning the
+  system default output, which is what the monitor was before it could
+  be chosen at all. Either way it is dropped when it comes out as the
+  output device itself, since one stream cannot be both. It is a new key
+  rather than the "monitor_device" that config.py still pops: a value
+  left in a config from before that is a device somebody stopped using
+  versions ago, and adopting it silently would move the monitor without
+  anyone asking
 - Sharing: board_file.py reads/writes .sbboard files (links, not audio);
   only sounds with a "source" can travel. downloader.fetch_clip() is the
   one download path, used by both the Download tab and import.

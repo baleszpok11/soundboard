@@ -40,6 +40,8 @@ from .theme import (
 )
 
 NO_DEVICE_LABEL = "(none)"
+# The monitor's own entry: no device named, take the system's.
+SYSTEM_DEFAULT_LABEL = "(system default)"
 MEASURE_VOICE = "Measure my voice"
 MEASURE_VOICE_S = 5  # long enough for a sentence, short enough to sit through
 METER_POLL_MS = 50
@@ -241,16 +243,40 @@ class DeviceMixin:
             border_width=1, border_color=COLOR_BORDER,
         ).pack(side="left", padx=(8, 0))
 
-        self._add_volume_row(frame, 2, "Mic volume:", "mic_volume", "mic_gain")
-        self._add_volume_row(frame, 3, "Soundboard volume:", "sound_volume", "sound_gain")
-        self._add_volume_row(frame, 4, "Monitor volume:", "monitor_volume", "monitor_gain")
-        self._build_match_controls(frame, 5)
-        self._build_stop_fade_controls(frame, 6)
-        self._build_mic_controls(frame, 7)
-        self._build_startup_controls(frame, 8)
-        self._build_remote_controls(frame, 9)
-        self._build_appearance_controls(frame, 10)
+        ctk.CTkLabel(frame, text="Headphones (monitor):", text_color=COLOR_TEXT_DIM,
+                     font=font("small_bold")).grid(
+            row=2, column=0, sticky="w", padx=8, pady=8
+        )
+        self.preview_var = tk.StringVar(
+            value=self.config.get("preview_device") or SYSTEM_DEFAULT_LABEL)
+        self.preview_menu = ctk.CTkOptionMenu(
+            frame,
+            variable=self.preview_var,
+            values=self._preview_device_names(),
+            command=self._on_preview_device_change,
+            fg_color=COLOR_ROW,
+            text_color=COLOR_TEXT,
+        )
+        self.preview_menu.grid(row=2, column=1, sticky="ew", padx=8, pady=8)
+
+        self._add_volume_row(frame, 3, "Mic volume:", "mic_volume", "mic_gain")
+        self._add_volume_row(frame, 4, "Soundboard volume:", "sound_volume", "sound_gain")
+        self._add_volume_row(frame, 5, "Monitor volume:", "monitor_volume", "monitor_gain")
+        self._build_match_controls(frame, 6)
+        self._build_stop_fade_controls(frame, 7)
+        self._build_mic_controls(frame, 8)
+        self._build_startup_controls(frame, 9)
+        self._build_remote_controls(frame, 10)
+        self._build_appearance_controls(frame, 11)
         return frame
+
+    def _preview_device_names(self):
+        """What the monitor picker offers: every output device, plus the
+        system default. "(none)" is left out - it is the output list's
+        way of saying "do not open this stream", and a monitor with no
+        device is what picking the output itself already gives."""
+        return [SYSTEM_DEFAULT_LABEL] + [
+            name for index, name in self.output_devices if index is not None]
 
     def _build_match_controls(self, frame, row):
         """Loudness matching: one switch for the board, and a button that
@@ -588,6 +614,8 @@ class DeviceMixin:
             names = [name for _, name in devices]
             menu.configure(values=names)
             var.set(self.config.get(key) or NO_DEVICE_LABEL)
+        self.preview_menu.configure(values=self._preview_device_names())
+        self.preview_var.set(self.config.get("preview_device") or SYSTEM_DEFAULT_LABEL)
 
     def _on_input_device_change(self, selected_name):
         self.config["input_device"] = None if selected_name == NO_DEVICE_LABEL else selected_name
@@ -599,6 +627,12 @@ class DeviceMixin:
         save_config(self.config)
         self._restart_audio_engine()
 
+    def _on_preview_device_change(self, selected_name):
+        self.config["preview_device"] = (
+            None if selected_name == SYSTEM_DEFAULT_LABEL else selected_name)
+        save_config(self.config)
+        self._restart_audio_engine()
+
     def _on_toggle_hear_self(self):
         hear = bool(self.hear_self_checkbox.get())
         self.config["hear_self"] = hear
@@ -607,14 +641,30 @@ class DeviceMixin:
 
     # -- starting and watching the streams ----------------------------------
 
+    def _monitor_device(self, output_device):
+        """Which device the monitor stream opens on: the one chosen for
+        it, or the system default output when none is.
+
+        Either way it is dropped when it comes out as the output device
+        itself - the same stream would then carry the local copy twice,
+        and Preview would go down the cable, which is the one thing it
+        is for not doing.
+        """
+        chosen = self._match_device_name(self.output_devices,
+                                         self.config.get("preview_device"))
+        if chosen is not None:
+            monitor = self._index_for_name(self.output_devices, chosen)
+        else:
+            # A named device that is not connected falls back to the
+            # default rather than to nothing, so unplugging headphones
+            # leaves a monitor rather than silently taking Preview away.
+            monitor = self._system_default_device(output=True)
+        return None if monitor == output_device else monitor
+
     def _start_audio_engine(self):
-        # Local copy goes to the system default output, unless that is
-        # already the selected output (it would play twice).
         input_device = self._index_for_name(self.input_devices, self.config.get("input_device"))
         output_device = self._index_for_name(self.output_devices, self.config.get("output_device"))
-        monitor_device = self._system_default_device(output=True)
-        if monitor_device == output_device:
-            monitor_device = None
+        monitor_device = self._monitor_device(output_device)
         self.audio_engine.mic_gain = self.config["mic_volume"] / 100
         self.audio_engine.sound_gain = self.config["sound_volume"] / 100
         self.audio_engine.monitor_gain = self.config["monitor_volume"] / 100
@@ -639,6 +689,21 @@ class DeviceMixin:
                 warnings.append(f"{label} \"{name}\" stopped responding. Click Refresh devices.")
         if self._output_down_since is not None and time.monotonic() - self._output_down_since <= RECONNECT_WINDOW_S:
             warnings.append("Trying to reconnect the virtual mic output...")
+        preview_name = self.config.get("preview_device")
+        if preview_name:
+            matched = self._match_device_name(self.output_devices, preview_name)
+            if matched is None:
+                warnings.append(
+                    f"Headphones \"{preview_name}\" aren't connected. Preview and "
+                    "\"Hear soundboard\" are playing on the system's default output "
+                    "instead. Plug them in and click Refresh devices, or pick another "
+                    "device.")
+            elif self._index_for_name(self.output_devices, matched) == output_device:
+                warnings.append(
+                    f"Headphones are set to \"{preview_name}\", which is also the "
+                    "virtual mic output, so there is nowhere separate to preview a "
+                    "sound - a preview would go down the cable. Pick a different "
+                    "device for the headphones.")
         input_name = self.config.get("input_device") or ""
         if input_device is not None and any(h in input_name.lower() for h in LOOPBACK_INPUT_HINTS):
             warnings.append(
@@ -690,16 +755,19 @@ class DeviceMixin:
             self._start_audio_engine()
             return
         except Exception as e:
-            error = e
+            # Not named `error`: that is the dialog this reports through,
+            # and binding the exception to it turned the one line that
+            # tells anyone a device failed into a TypeError.
+            problem = e
         if self._fallback_to_mme():
             try:
                 self._start_audio_engine()
                 save_config(self.config)
                 return
             except Exception as e:
-                error = e
+                problem = e
         if show_errors:
-            error(self.root, "Audio device error", str(error))
+            error(self.root, "Audio device error", str(problem))
         self._update_device_warnings()
 
     def _fallback_to_mme(self):
@@ -714,7 +782,9 @@ class DeviceMixin:
         self.config["host_api"] = "MME"
         self.input_devices = self._list_devices(output=False)
         self.output_devices = self._list_devices(output=True)
-        for key, devices in (("input_device", self.input_devices), ("output_device", self.output_devices)):
+        for key, devices in (("input_device", self.input_devices),
+                             ("output_device", self.output_devices),
+                             ("preview_device", self.output_devices)):
             stored = self.config.get(key)
             self.config[key] = self._match_device_name(devices, stored) or stored
         self._refresh_device_menus()

@@ -625,6 +625,107 @@ def monitor_volume(board):
 monitor_volume.settings = {"sound_volume": 40}
 
 
+def monitor_device_choice(board):
+    """The monitor device picker: what it offers, which index it hands
+    the engine, and what it says when the choice leaves nowhere to
+    preview on.
+
+    The runner has no sound card, so the device list is stood in for -
+    what is under test is the choice, not PortAudio. query_devices is
+    answered for the stand-in indices too, because the warnings walk
+    the real device table on the way past.
+    """
+    import sounddevice as sd
+
+    from soundboard.devices import SYSTEM_DEFAULT_LABEL
+
+    app = board.app
+    real_query = sd.query_devices
+
+    def answered(device=None, **rest):
+        try:
+            return real_query(device, **rest)
+        except Exception:
+            return {"name": "Stand-in", "hostapi": 0,
+                    "max_output_channels": 2, "max_input_channels": 0}
+
+    sd.query_devices = answered
+    board.open_tab("Settings")  # where the picker lives
+    app.output_devices = [(None, "(none)"), (7, "Headphones"), (8, "Cable Input")]
+    app.config["output_device"] = "Cable Input"
+    app._system_default_device = lambda output: 7
+    try:
+        app._refresh_device_menus()
+        yield
+
+        offered = list(app.preview_menu.cget("values"))
+        board.check(offered == [SYSTEM_DEFAULT_LABEL, "Headphones", "Cable Input"],
+                    f"the monitor picker offers {offered}")
+        board.expect_visible(app.preview_menu, "the monitor device picker")
+        board.expect_fits(app.preview_menu, "the monitor device picker")
+        board.shot("monitor-device")
+
+        # Nothing chosen is the system default, which is what the monitor
+        # was before it could be chosen at all.
+        app.config["preview_device"] = None
+        board.check(app._monitor_device(8) == 7,
+                    "with no device chosen the monitor left the system default")
+        board.check(app._monitor_device(7) is None,
+                    "the monitor opened the output device a second time")
+        yield
+
+        # A chosen device is the one the engine is given...
+        app.config["preview_device"] = "Headphones"
+        board.check(app._monitor_device(8) == 7,
+                    f"the chosen monitor device was not used: {app._monitor_device(8)}")
+        # ... unless it is the output, where there is nothing to hear
+        # separately and a preview would go down the cable.
+        app.config["preview_device"] = "Cable Input"
+        board.check(app._monitor_device(8) is None,
+                    "the monitor and the output were opened on one device")
+        app._update_device_warnings()
+        yield
+        said = app.loop_warning.cget("text")
+        board.check("nowhere separate to preview" in said,
+                    f"the clash was not reported: {said!r}")
+
+        # Unplugged headphones fall back to the system default rather
+        # than leaving the board with no monitor at all.
+        app.config["preview_device"] = "Studio Cans"
+        board.check(app._monitor_device(8) == 7,
+                    "an unplugged monitor device took the monitor away")
+        app._update_device_warnings()
+        yield
+        said = app.loop_warning.cget("text")
+        board.check("aren't connected" in said,
+                    f"an unplugged monitor device was not reported: {said!r}")
+        board.shot("monitor-device-warning")
+
+        # The picker writes what it was set to, and shows it afterwards.
+        # Restarting the streams on a stand-in index fails and says so,
+        # which is the dialog this drains rather than the thing tested.
+        before = len(board.dialogs)
+        # The dropdown's own callback, which is what a click runs: it
+        # sets the variable and then calls the command.
+        app.preview_menu._dropdown_callback("Headphones")
+        yield
+        board.check(app.config["preview_device"] == "Headphones",
+                    f"the choice was not saved: {app.config.get('preview_device')}")
+        board.check(app.preview_var.get() == "Headphones",
+                    f"the picker shows {app.preview_var.get()!r}")
+        # The device failure has to arrive as a dialog: the line that
+        # reports it used to raise a TypeError instead.
+        board.check(len(board.dialogs) > before,
+                    "a monitor device that will not open was not reported")
+        app.preview_menu._dropdown_callback(SYSTEM_DEFAULT_LABEL)
+        yield
+        board.check(app.config["preview_device"] is None,
+                    "the system default was saved as a device name")
+        yield
+    finally:
+        sd.query_devices = real_query
+
+
 SCENARIOS = {
     "board_opens": board_opens,
     "nothing_is_clipped": nothing_is_clipped,
@@ -635,5 +736,6 @@ SCENARIOS = {
     "colours_and_defaults": colours_and_defaults,
     "remote_control": remote_control,
     "preview_sound": preview_sound,
+    "monitor_device_choice": monitor_device_choice,
     "monitor_volume": monitor_volume,
 }
