@@ -43,7 +43,7 @@ together, from one virtual microphone.
   amount slider, so what others hear can be changed while you talk
 - "Hear soundboard" toggle plays clips on your own speakers/headphones
   too — turning it off doesn't affect what others hear through the
-  virtual cable
+  virtual cable, and the device it uses can be chosen
 - Random groups: give one entry several clips and each trigger plays a
   different one, never the same one twice in a row
 - Re-triggering a sound that's still playing restarts it
@@ -242,11 +242,19 @@ button on the Soundboard tab, so the board itself keeps the window.
   While no virtual cable is installed at all, a warning says so and
   offers the download page for your platform; it goes away once the cable
   is installed and the devices are refreshed.
-- **Hear soundboard:** when checked, clips also play on your system's
-  default output (your speakers/headphones) so you know what's being
-  triggered. Only clips are sent there, not your mic. If the virtual mic
-  output is itself your default output (e.g. no virtual cable installed),
-  you'll hear the main mix regardless of this setting.
+- **Headphones (monitor):** which device Preview and "Hear soundboard"
+  play on. Left at "(system default)" it follows whatever your system's
+  default output is, which is what it has always done; pick a device to
+  pin it to your headphones instead, so previewing works even while the
+  system default is something else. Picking the virtual mic output here
+  leaves nowhere separate to preview on, and a warning says so. A chosen
+  device that isn't plugged in falls back to the system default rather
+  than taking the monitor away.
+- **Hear soundboard:** when checked, clips also play on the monitor
+  device above (by default your speakers/headphones) so you know what's
+  being triggered. Only clips are sent there, not your mic. If the
+  virtual mic output is itself the monitor device (e.g. no virtual cable
+  installed), you'll hear the main mix regardless of this setting.
 - **Duck under clips:** off until you switch it on, in the Mic row of the
   settings. While any clip is playing your microphone drops by the amount
   on the slider and comes back when the clip ends, ramped so your voice
@@ -278,6 +286,13 @@ button on the Soundboard tab, so the board itself keeps the window.
   and a "Stop" button appears next to Play while it runs. "Stop" is also
   in the right-click/More menu, which is how you stop a sound in Grid
   view.
+- **Preview** in a sound's right-click/More menu plays it on the monitor
+  device only, never down the virtual cable, so you can check the next
+  cue without the call hearing it. It isn't counted as a play and doesn't
+  move Next/Previous; "Stop preview" appears in the same menu while one
+  is running. Set which device it uses under **Headphones (monitor)** in
+  the settings - with the monitor and the virtual mic output on the same
+  device there is nowhere separate to play it and it would be heard.
 - **Fades...** in a sound's More menu sets its fade in, its fade out and,
   for a looping sound, a crossfade at the wrap so a loop that wasn't cut
   at a zero crossing doesn't tick once a bar. All default to none, so

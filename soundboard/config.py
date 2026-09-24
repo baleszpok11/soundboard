@@ -165,8 +165,17 @@ def prepare_config(config):
         config["output_device"] = config.pop("device")
     config.setdefault("output_device", None)
     config.setdefault("input_device", None)
+    # Both were dropped when the monitor became "the system default
+    # output, unless that is the output itself". The device choice is
+    # back under a new name rather than under this one: a value sitting
+    # in a config from before that is a device somebody stopped using
+    # versions ago, and adopting it silently would move the monitor
+    # without anyone asking.
     config.pop("monitor_device", None)
     config.pop("monitor_muted", None)
+    # None means the system default output, which is what the monitor
+    # has been since.
+    config.setdefault("preview_device", None)
     config.setdefault("hear_self", True)
     config.setdefault("mic_volume", 100)
     config.setdefault("sound_volume", 100)
