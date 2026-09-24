@@ -310,6 +310,10 @@ button on the Soundboard tab, so the board itself keeps the window.
 - Playing a sound that's already playing restarts it from the beginning.
 - **Mic volume / Soundboard volume:** 0–200%. Each sound also has its own
   volume slider. A limiter keeps the combined output from distorting.
+- **Monitor volume:** how loud clips are on your own speakers/headphones
+  ("Hear soundboard" and Preview), in place of the soundboard volume, so
+  you can hear them clearly while the call gets them quieter. It starts at
+  whatever your soundboard volume was.
 - New sounds start at 20%, because clips are usually mastered much louder
   than a voice and full volume is how people deafen a call the first time
   they press a button. Turn a sound up once and it stays there. Sounds

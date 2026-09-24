@@ -663,6 +663,10 @@ class AudioEngine:
         self.mic_enabled = True  # False while muted or push-to-talk isn't held
         self._mic_level = 1.0  # gain applied to the last block, for smooth changes
         self.sound_gain = 1.0
+        # The monitor's own volume, in place of sound_gain rather than on
+        # top of it, so what you hear can be loud while what goes out is
+        # not.
+        self.monitor_gain = 1.0
         # How long stop_all and stop_key take. 0 cuts, which is what a
         # board does until the setting is switched on.
         self.stop_fade_s = 0.0
@@ -1036,7 +1040,7 @@ class AudioEngine:
             # with it.
             playing = any(not s.paused for s in self._active_sounds)
             sounds = self._mix_sounds("_active_sounds", frames, self.output_channels,
-                                      report_ends=True)
+                                      self.sound_gain, report_ends=True)
             # Only the mic is ducked, and only here. The monitor callback
             # carries clips alone, so what you hear locally is untouched
             # and the duck reaches the cable, which is where the voice and
@@ -1054,13 +1058,14 @@ class AudioEngine:
             # Only when there is no output stream to report them: with
             # both running, the same clip ends in both lists.
             mixed = self._mix_sounds("_active_sounds_monitor", frames, self.monitor_channels,
+                                     self.monitor_gain,
                                      report_ends=self.output_stream is None)
         outdata[:] = self._monitor_limiter.process(mixed)
         self._report_ends()
 
-    def _mix_sounds(self, attr, frames, channels, report_ends=False):
+    def _mix_sounds(self, attr, frames, channels, gain, report_ends=False):
         """Sum one block from each clip in the named list, drop finished
-        clips, and apply the soundboard volume. Caller holds the lock.
+        clips, and apply that stream's volume. Caller holds the lock.
 
         `report_ends` is set by one caller only: the two lists hold the
         same clip twice, once per stream, and a board that plays the next
@@ -1079,7 +1084,7 @@ class AudioEngine:
             else:
                 still_active.append(sound)
         setattr(self, attr, still_active)
-        mixed *= self.sound_gain
+        mixed *= gain
         return mixed
 
     def _report_ends(self):
