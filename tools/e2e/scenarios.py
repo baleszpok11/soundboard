@@ -839,6 +839,38 @@ auto_push_to_talk.settings = {
 }
 
 
+def settings_reach_the_bottom(board):
+    """Every row of the settings panel can be scrolled into view (#170).
+
+    The panel is taller than its tab at the default size and far taller
+    at the window's minimum; packed straight into the tab, the rows past
+    the bottom edge could not be reached at all.
+    """
+    app = board.app
+    board.open_tab("Settings")
+    yield
+    rows = app.settings_panel.grid_slaves()
+    last_row = max(int(w.grid_info()["row"]) for w in rows)
+    last = [w for w in rows if int(w.grid_info()["row"]) == last_row]
+    canvas = app.settings_scroll._parent_canvas
+    canvas.yview_moveto(1.0)
+    yield
+    board.shot("settings-scrolled-to-bottom")
+    view_bottom = canvas.winfo_rooty() + canvas.winfo_height()
+    for widget in last:
+        board.expect_visible(widget, f"{type(widget).__name__} on the last settings row")
+        bottom = widget.winfo_rooty() + widget.winfo_height()
+        board.check(
+            bottom <= view_bottom,
+            f"the last settings row ends at {bottom}, below the visible "
+            f"bottom at {view_bottom}, even scrolled all the way down")
+    yield
+
+
+# The window's minimum, from main.py.
+settings_reach_the_bottom.geometry = "640x480+60+60"
+
+
 SCENARIOS = {
     "board_opens": board_opens,
     "nothing_is_clipped": nothing_is_clipped,
@@ -852,4 +884,5 @@ SCENARIOS = {
     "monitor_device_choice": monitor_device_choice,
     "monitor_volume": monitor_volume,
     "auto_push_to_talk": auto_push_to_talk,
+    "settings_reach_the_bottom": settings_reach_the_bottom,
 }

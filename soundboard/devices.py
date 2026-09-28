@@ -165,11 +165,9 @@ class DeviceMixin:
     # -- device selection UI -------------------------------------------------
 
     def _build_device_selectors(self, parent):
-        """Build the settings panel. It is not placed here: it has two
-        homes, its own tab and a disclosure on the Soundboard tab, and
-        app._place_settings_panel decides which one is showing. `parent`
-        must be an ancestor of both, since a Tk widget cannot be
-        reparented and this one is shown with pack(in_=...)."""
+        """Build the settings panel into `parent`. It is not placed
+        here: app._build_settings packs it into the Settings tab's
+        scroller."""
         frame = ctk.CTkFrame(
             parent, fg_color=COLOR_SURFACE,
             border_width=CARD_BORDER, border_color=COLOR_BORDER,

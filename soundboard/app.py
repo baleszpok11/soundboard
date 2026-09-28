@@ -196,7 +196,7 @@ class Soundboard(DeviceMixin, MicHotkeyMixin, SoundListMixin, DownloadMixin, Edi
 
         self._build_settings(board_tab)
         # Holder stays packed so the warning can appear above the sound
-        # list, and it is what the settings panel opens above.
+        # list.
         warning_holder = tk.Frame(board_tab, height=1)
         register_tk(warning_holder, bg=COLOR_BG)
         warning_holder.pack(fill="x")
@@ -207,7 +207,6 @@ class Soundboard(DeviceMixin, MicHotkeyMixin, SoundListMixin, DownloadMixin, Edi
         ))
         self._build_cable_warning(warning_holder)
         self._build_permission_warning(warning_holder)
-        self._place_settings_panel()
         # The controls are packed before the list although they sit below
         # it: the list is the expanding child, and whatever is packed after
         # it gets whatever is left of the cavity, which was nothing. Pack
@@ -262,15 +261,13 @@ class Soundboard(DeviceMixin, MicHotkeyMixin, SoundListMixin, DownloadMixin, Edi
         is no arrangement that shows both it and a board. Packed into the
         tab it took the height it asked for and pack answered by
         unmapping everything after it - the profile row, the search box
-        and the whole list - which is what #150 was. A scrolling box
-        around it does not help either: Tk clips a widget to its parent,
-        and the panel's parent is the window, so it draws straight over
-        the board whatever it is packed into.
+        and the whole list - which is what #150 was.
 
-        There is still one panel, not two: a Tk widget has a single
-        parent and cannot be reparented, so a second copy would be a
-        second set of meters, device menus and hotkey buttons, and only
-        one of them would be kept up to date.
+        In its own tab it is still taller than the window can promise, so
+        it is built inside a scrolling frame there (#170). That works now
+        where it did not on the board: Tk clips a widget to its parent,
+        and the panel's parent is the scroller rather than the window it
+        was once shared from.
         """
         self.settings_button = ctk.CTkButton(
             board_tab, text=SETTINGS_SHOW, command=self.show_settings_tab,
@@ -278,7 +275,11 @@ class Soundboard(DeviceMixin, MicHotkeyMixin, SoundListMixin, DownloadMixin, Edi
             text_color=COLOR_TEXT, border_width=1, border_color=COLOR_BORDER,
         )
         self.settings_button.pack(fill="x", padx=2, pady=(2, 0))
-        self.settings_panel = self._build_device_selectors(self.root)
+        self.settings_scroll = ctk.CTkScrollableFrame(
+            self.settings_tab, fg_color=COLOR_BG)
+        self.settings_scroll.pack(fill="both", expand=True)
+        self.settings_panel = self._build_device_selectors(self.settings_scroll)
+        self.settings_panel.pack(fill="x", padx=2, pady=(2, GAP))
 
     def show_settings_tab(self):
         """The board's Settings button, and the way back from anywhere
@@ -301,21 +302,6 @@ class Soundboard(DeviceMixin, MicHotkeyMixin, SoundListMixin, DownloadMixin, Edi
         the tab draws it, which is the whole of what was missing.
         """
         self.tabview.tab(self.tabview.get()).lift()
-        self._place_settings_panel()
-
-    def _place_settings_panel(self, *_):
-        """Show the panel while its tab is open, and nowhere otherwise.
-
-        Still placed rather than simply built into the tab: the panel is
-        parented to the window, because it was shown in two places once
-        and the meters inside it must not be built twice.
-        """
-        panel = getattr(self, "settings_panel", None)
-        if panel is None:
-            return  # a tab change during startup, before the panel exists
-        panel.pack_forget()
-        if self.tabview.get() == "Settings":
-            panel.pack(in_=self.settings_tab, fill="x", padx=2, pady=(2, GAP))
 
     def _build_appearance_controls(self, frame, row):
         """Light/dark, or follow the OS. "System" is the default and is
