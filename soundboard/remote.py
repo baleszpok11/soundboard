@@ -430,7 +430,7 @@ class RemoteMixin:
         return {"ok": True, "index": index, "name": sound.get("name")}
 
     def _remote_stop_all(self, payload):
-        self.audio_engine.stop_all()
+        self.stop_all_sounds()
         return {"ok": True}
 
     def _remote_pause(self, payload):

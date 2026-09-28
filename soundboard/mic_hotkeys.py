@@ -17,6 +17,7 @@ from .audio_engine import (
 )
 from .config import save_config
 from .dialogs import HotkeyDialog, ask_yes_no, error, warn
+from .flow_row import FlowRow
 from .hotkeys import (
     MACOS_INPUT_MONITORING_URL,
     HotkeyListener,
@@ -26,6 +27,7 @@ from .hotkeys import (
     pin_macos_keyboard_layout,
     request_hotkey_permission,
 )
+from .ptt import HOLD, MAX_LEAD_S, MAX_TAIL_S, TAP, key_sending_granted
 from .theme import (
     COLOR_ACCENT_TEXT,
     COLOR_BG,
@@ -39,6 +41,7 @@ from .theme import (
     COLOR_TEXT,
     COLOR_TEXT_DIM,
     font,
+    wrap_to_width,
 )
 
 
@@ -230,6 +233,169 @@ class MicHotkeyMixin:
         self.audio_engine.set_duck(
             duck_depth(amount) if self.config.get("duck_mic") else 0.0)
 
+    # -- the chat app's own talk key ------------------------------------
+
+    def _build_auto_ptt_controls(self, frame, row):
+        """Holding another application's push-to-talk key while the board
+        plays. Off by default, and it has no default key: the key belongs
+        to Discord or the game, not to us, and there is nothing sensible
+        to guess."""
+        ctk.CTkLabel(frame, text="Chat app:", text_color=COLOR_TEXT_DIM,
+                     font=font("small_bold")).grid(
+            row=row, column=0, sticky="w", padx=8, pady=6)
+        box = ctk.CTkFrame(frame, fg_color="transparent")
+        box.grid(row=row, column=1, columnspan=2, sticky="ew", padx=8, pady=6)
+        # A flow row rather than a packed one: five controls do not fit
+        # across the panel at the app's 640px minimum, and pack answers
+        # that by collapsing the last of them to a pixel each.
+        controls = FlowRow(box, fg_color="transparent")
+        controls.pack(fill="x")
+        self.auto_ptt_checkbox = controls.add(ctk.CTkCheckBox(
+            controls, text="Hold its talk key while a clip plays",
+            command=self._on_toggle_auto_ptt,
+            fg_color=COLOR_ORANGE, hover_color=COLOR_ORANGE_HOVER,
+            checkmark_color=COLOR_ON_ACCENT, text_color=COLOR_TEXT,
+        ))
+        if self.config.get("auto_ptt"):
+            self.auto_ptt_checkbox.select()
+        self.auto_ptt_hotkey_button = controls.add(ctk.CTkButton(
+            controls, text="", command=self.set_auto_ptt_hotkey,
+            fg_color=COLOR_ROW, hover_color=COLOR_ROW_HOVER, text_color=COLOR_TEXT,
+            border_width=1, border_color=COLOR_BORDER,
+        ), gap=12)
+        self.auto_ptt_mode_var = ctk.StringVar(
+            value=TAP.capitalize() if self.config.get("auto_ptt_mode") == TAP
+            else HOLD.capitalize())
+        controls.add(ctk.CTkOptionMenu(
+            controls, variable=self.auto_ptt_mode_var, width=90,
+            values=[HOLD.capitalize(), TAP.capitalize()],
+            command=self._on_auto_ptt_mode,
+            fg_color=COLOR_ROW, text_color=COLOR_TEXT,
+        ), gap=12)
+        self.auto_ptt_lead_slider, self.auto_ptt_lead_label = self._auto_ptt_timing(
+            controls, "Lead", MAX_LEAD_S, self.config.get("auto_ptt_lead", 0.1),
+            self._on_auto_ptt_lead)
+        self.auto_ptt_tail_slider, self.auto_ptt_tail_label = self._auto_ptt_timing(
+            controls, "Tail", MAX_TAIL_S, self.config.get("auto_ptt_tail", 0.2),
+            self._on_auto_ptt_tail)
+        # Wrapped to whatever width the row has rather than to a guess:
+        # the macOS permission line is long, and a fixed wraplength is
+        # cut off in a narrow window.
+        self.auto_ptt_status = wrap_to_width(ctk.CTkLabel(
+            box, text="", text_color=COLOR_TEXT_DIM, font=font("small"),
+            justify="left", anchor="w"))
+        self.auto_ptt_status.pack(fill="x", pady=(4, 0))
+        self._apply_auto_ptt()
+
+    def _auto_ptt_timing(self, controls, text, maximum, value, command):
+        """One labelled millisecond slider, added to the flow row as a
+        single item: a slider on one line and the number it reads on the
+        next would say nothing. The lead and the tail are this twice."""
+        holder = ctk.CTkFrame(controls, fg_color="transparent")
+        ctk.CTkLabel(holder, text=text, text_color=COLOR_TEXT_DIM,
+                     font=font("small")).pack(side="left")
+        slider = ctk.CTkSlider(
+            holder, from_=0, to=maximum, width=90,
+            number_of_steps=int(maximum * 20), command=command)
+        slider.set(value)
+        slider.pack(side="left", padx=(6, 0))
+        label = ctk.CTkLabel(holder, text="", width=52, font=font("small"),
+                             text_color=COLOR_TEXT_DIM)
+        label.pack(side="left")
+        controls.add(holder, gap=12)
+        return slider, label
+
+    def set_auto_ptt_hotkey(self):
+        hotkey = self._ask_hotkey(
+            "Chat app's talk key", self.config.get("auto_ptt_hotkey"), owner="auto_ptt")
+        if hotkey is None:
+            return
+        self.config["auto_ptt_hotkey"] = hotkey or None
+        save_config(self.config)
+        self._apply_auto_ptt()
+
+    def _on_toggle_auto_ptt(self):
+        self.config["auto_ptt"] = bool(self.auto_ptt_checkbox.get())
+        save_config(self.config)
+        self._apply_auto_ptt()
+
+    def _on_auto_ptt_mode(self, label):
+        self.config["auto_ptt_mode"] = label.lower()
+        save_config(self.config)
+        self._apply_auto_ptt()
+
+    def _on_auto_ptt_lead(self, value):
+        self.config["auto_ptt_lead"] = round(float(value), 2)
+        self._apply_auto_ptt()
+        self._save_config_soon()
+
+    def _on_auto_ptt_tail(self, value):
+        self.config["auto_ptt_tail"] = round(float(value), 2)
+        self._apply_auto_ptt()
+        self._save_config_soon()
+
+    def _apply_auto_ptt(self):
+        """Push the settings at the sender and say what it will do. A key
+        already held under the old settings is let go by configure()."""
+        hotkey = self.config.get("auto_ptt_hotkey")
+        self.auto_ptt_hotkey_button.configure(
+            text=f"Its talk key: {hotkey}" if hotkey else "Set its talk key")
+        lead = self.config.get("auto_ptt_lead", 0.1)
+        tail = self.config.get("auto_ptt_tail", 0.2)
+        self.auto_ptt_lead_label.configure(text=f"{int(round(lead * 1000))} ms")
+        self.auto_ptt_tail_label.configure(text=f"{int(round(tail * 1000))} ms")
+        self.auto_ptt.configure(
+            self.config.get("auto_ptt", False), hotkey,
+            self.config.get("auto_ptt_mode", HOLD), lead, tail)
+        self.auto_ptt_status.configure(text=self._auto_ptt_status_text(),
+                                       text_color=self._auto_ptt_status_colour())
+
+    def _auto_ptt_status_text(self):
+        if not self.config.get("auto_ptt"):
+            return ("For a game or chat app set to push to talk: the board holds "
+                    "its key down so a clip is actually heard.")
+        if not self.auto_ptt.active:
+            return "Set the key your chat app talks on to use this."
+        if not key_sending_granted():
+            return ("macOS is blocking the key. Allow Soundboard (or your terminal, "
+                    "when running from source) under Privacy & Security > "
+                    "Accessibility, then restart Soundboard.")
+        if self.auto_ptt.error:
+            return self.auto_ptt.error
+        mode = self.config.get("auto_ptt_mode", HOLD)
+        held = ("tapped before and after each clip" if mode == TAP
+                else "held down while a clip plays")
+        return f"'{self.config['auto_ptt_hotkey']}' is {held}."
+
+    def _auto_ptt_status_colour(self):
+        if not self.config.get("auto_ptt"):
+            return COLOR_TEXT_DIM
+        if not self.auto_ptt.active or not key_sending_granted() or self.auto_ptt.error:
+            return COLOR_ERROR
+        return COLOR_TEXT_DIM
+
+    def _on_auto_ptt_error(self, message):
+        # Called from wherever a clip was started; the label is Tk's.
+        self.root.after(0, lambda: self.auto_ptt_status.configure(
+            text=message, text_color=COLOR_ERROR))
+
+    def _start_with_ptt(self, start):
+        """Open the chat app's channel, then play. The key goes down now
+        and the clip waits out the lead, because an app whose channel
+        opens a moment late swallows the front of it otherwise."""
+        lead_ms = self.auto_ptt.begin()
+        if lead_ms:
+            self.root.after(lead_ms, start)
+        else:
+            start()
+
+    def stop_all_sounds(self):
+        """Everything's way out: the button, the hotkey and the remote.
+        The key we are holding for the chat app goes with it, rather than
+        staying down for the length of the tail after a panic stop."""
+        self.audio_engine.stop_all()
+        self.auto_ptt.release()
+
     def _update_mic_hotkey_buttons(self):
         mute = self.config.get("mute_hotkey")
         ptt = self.config.get("ptt_hotkey")
@@ -419,6 +585,10 @@ class MicHotkeyMixin:
             ("pause", "Pause", self.config.get("pause_hotkey")),
             ("next", "Play next", self.config.get("next_hotkey")),
             ("prev", "Play previous", self.config.get("prev_hotkey")),
+            # Not a key we listen for - it is the one we send - but a key
+            # that is both fires a sound every time the channel is opened
+            # by hand, which nobody means to set up.
+            ("auto_ptt", "the chat app's talk key", self.config.get("auto_ptt_hotkey")),
         ]
         candidates += [(s, f"'{s['name']}'", s.get("hotkey")) for s in self.sounds]
         for obj, label, other in candidates:
@@ -445,7 +615,7 @@ class MicHotkeyMixin:
             mapping[replay_hotkey] = self._save_replay_from_hotkey
         stop_hotkey = self.config.get("stop_hotkey")
         if stop_hotkey and is_valid_hotkey(stop_hotkey):
-            mapping[stop_hotkey] = self.audio_engine.stop_all
+            mapping[stop_hotkey] = self.stop_all_sounds
         pause_hotkey = self.config.get("pause_hotkey")
         if pause_hotkey and is_valid_hotkey(pause_hotkey):
             mapping[pause_hotkey] = self.toggle_pause

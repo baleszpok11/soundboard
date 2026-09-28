@@ -35,6 +35,9 @@ together, from one virtual microphone.
   people hear both at once — no separate mixer app needed
 - Mic processing: a noise gate to drop the room between words, a rumble
   cut that's on by default, and a live pitch shift for your own voice
+- Holds your chat app's own push-to-talk key while a clip plays, so a
+  board fired into a call that's set to push to talk is actually heard -
+  hold it or tap it, with a lead and tail for apps that open late
 - Choose which microphone (input) and which virtual cable (output) are used
 - Level meters under both device pickers, plus a "Test" button that sends
   a tone to the output, so you can see your routing works without asking
@@ -340,9 +343,19 @@ button on the Soundboard tab, so the board itself keeps the window.
   play. The label under them shows whether your mic is live.
 - **Stop all** silences every playing sound. "Set stop hotkey" assigns a
   global hotkey for it. The app won't let two actions share a hotkey.
-- Games that require their own push-to-talk key only send sounds while
-  you hold that key; use the game's open-mic/voice-activation mode, or
-  hold the key while a sound plays.
+- **Chat app set to push to talk:** a game or chat app that only opens the
+  channel while you hold its talk key would otherwise swallow every clip.
+  Under **Chat app** in the settings, tick "Hold its talk key while a clip
+  plays" and set the key that app talks on - the board presses and holds
+  it for as long as something is playing, and lets go when it stops,
+  including on "Stop all" and when the app quits. Choose **Hold** for a
+  normal talk key or **Tap** for one that toggles the channel, and use
+  **Lead** and **Tail** if the app opens a moment late and clips the start
+  of a sound. The key must be one the soundboard itself does not use, and
+  on macOS sending keys needs Accessibility permission (Privacy &
+  Security > Accessibility) - the line under the setting says when it is
+  missing. Leaving it off, the alternative is still the game's
+  open-mic/voice-activation mode, or holding the key yourself.
 - If something goes wrong, the app shows an error and writes details to
   `soundboard_error.log` next to your settings. If the settings file is
   damaged, it's kept as `soundboard_config.json.broken` and the app starts

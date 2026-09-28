@@ -23,6 +23,7 @@ from .dialogs import ReportDialog, UpdateDialog, handle_exception, warn
 from .download_tab import DownloadMixin
 from .editor_tab import EditorMixin
 from .mic_hotkeys import MicHotkeyMixin
+from .ptt import AutoPTT
 from .remote import RemoteMixin
 from .share_tab import ShareMixin
 from .tts_tab import SpeechMixin
@@ -94,6 +95,10 @@ class Soundboard(DeviceMixin, MicHotkeyMixin, SoundListMixin, DownloadMixin, Edi
         self.audio_engine.on_finished = self._on_clip_finished
         self._transport_key = None  # the entry Next and Previous step from
         self.hotkey_listener = None
+        # The sending half of the hotkeys: the chat app's own talk key,
+        # held while a clip plays. Built before the settings panel, which
+        # is what configures it from the file.
+        self.auto_ptt = AutoPTT(on_error=self._on_auto_ptt_error)
         self.tray_icon = None
         self._pending_save = None
         self._output_was_up = False
@@ -426,6 +431,10 @@ class Soundboard(DeviceMixin, MicHotkeyMixin, SoundListMixin, DownloadMixin, Edi
         save_config(self.config)
 
     def _quit(self):
+        # First, before anything here can fail: a key held down for the
+        # chat app must not outlive the process that pressed it, or it
+        # leaves someone's microphone open with nothing to close it.
+        self.auto_ptt.release()
         if self._pending_save is not None:
             self.root.after_cancel(self._pending_save)
             self._flush_config()
