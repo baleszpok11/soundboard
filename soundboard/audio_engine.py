@@ -43,7 +43,14 @@ def scipy_signal():
 SAMPLE_RATE = 48000
 CHANNELS = 2
 BLOCK_SIZE = 1024
-MIC_TARGET_FRAMES = SAMPLE_RATE // 10  # 100 ms cushion against uneven mic delivery
+# The mic cushion: mic audio held back so that uneven delivery from the
+# input does not leave the output with nothing to play. It starts at the
+# safe size and shrinks to what the delivery has actually needed, since
+# on an even input it is most of the delay between speaking and being
+# heard. Running dry puts it straight back.
+MIC_TARGET_FRAMES = SAMPLE_RATE // 10  # 100 ms, the start and the fallback
+MIC_TARGET_MIN_FRAMES = 2 * BLOCK_SIZE
+MIC_ADAPT_FRAMES = 5 * SAMPLE_RATE  # how much evenness a smaller cushion needs
 MIC_MAX_FRAMES = SAMPLE_RATE // 2  # drop older mic audio beyond 500 ms
 CLIP_CACHE_BYTES = 512 * 1024 * 1024  # decoded clips kept in memory
 LIMITER_CEILING = 0.89  # about -1 dBFS
@@ -641,6 +648,7 @@ class AudioEngine:
         self._mic_buffer = collections.deque()
         self._mic_frames = 0
         self._mic_ready = False
+        self._reset_mic_cushion()
         # Raw mic blocks kept while recording a clip: None when idle, so
         # the input callback can tell the two apart in one check.
         self._recording = None
@@ -766,6 +774,7 @@ class AudioEngine:
             self._mic_buffer.clear()
             self._mic_frames = 0
             self._mic_ready = False
+            self._reset_mic_cushion()
             self._active_sounds = []
             self._active_sounds_monitor = []
             self.dropouts = 0
@@ -1107,26 +1116,61 @@ class AudioEngine:
             for key in ended:
                 self.on_finished(key)
 
+    def _reset_mic_cushion(self):
+        """Back to the safe cushion, for a new stream or one that ran dry:
+        whatever evenness was seen before says nothing about this one."""
+        self._mic_target = MIC_TARGET_FRAMES
+        self._start_mic_window()
+
+    def _start_mic_window(self):
+        self._mic_window = 0
+        self._mic_high = 0
+        self._mic_drawdown = 0
+
+    def _adapt_mic_cushion(self, frames):
+        """Shrink the cushion to the deepest dip the buffer took over the
+        last window, plus a block of margin for the input's block
+        boundaries to drift against the output's. Only ever down: up is
+        what running dry is for."""
+        level = self._mic_frames
+        self._mic_high = max(self._mic_high, level)
+        self._mic_drawdown = max(self._mic_drawdown, self._mic_high - level)
+        self._mic_window += frames
+        if self._mic_window < MIC_ADAPT_FRAMES:
+            return
+        needed = frames + self._mic_drawdown + BLOCK_SIZE
+        self._mic_target = max(MIC_TARGET_MIN_FRAMES, min(self._mic_target, needed))
+        self._start_mic_window()
+
     def _pull_mic_frames(self, frames, channels):
         out = np.zeros((frames, channels), dtype=np.float32)
         if not self._mic_ready:
-            if self._mic_frames < MIC_TARGET_FRAMES:
+            if self._mic_frames < self._mic_target:
                 return out
             self._mic_ready = True
+            self._start_mic_window()
+        self._adapt_mic_cushion(frames)
 
         # The mic and output run on separate clocks. Nudge mic playback
         # speed by ~0.2% to keep the cushion near its target instead of
-        # letting drift empty it (gaps) or overfill it (skips).
-        step = max(1, frames // 500)
+        # letting drift empty it (gaps) or overfill it (skips). The band
+        # above the target is narrow, because draining stops at its top
+        # and whatever the band holds is delay; and it drains at 1%,
+        # since at 0.2% a cushion that shrinks takes half a minute to
+        # shed the difference. 1% is 17 cents of pitch, which a voice
+        # does not show.
         need = frames
-        if self._mic_frames < MIC_TARGET_FRAMES:
-            need -= step
-        elif self._mic_frames > MIC_TARGET_FRAMES * 2:
-            need += step
+        if self._mic_frames < self._mic_target:
+            need -= max(1, frames // 500)
+        elif self._mic_frames > self._mic_target + BLOCK_SIZE // 4:
+            need += max(1, frames // 100)
 
         raw = self._take_mic(need)
         if len(raw) < need:
-            self._mic_ready = False  # ran dry; rebuild the cushion first
+            # Ran dry: the input is less even than the cushion assumed.
+            # Rebuild it at the safe size before playing the mic again.
+            self._mic_ready = False
+            self._reset_mic_cushion()
             out[:len(raw)] = _match_channels(raw, channels)
             return out
         return _match_channels(_resample(raw, need, frames), channels)
