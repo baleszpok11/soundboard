@@ -166,10 +166,15 @@ class SpeechMixin:
     def _tts_play(self, data, samplerate):
         self._set_tts_busy(False)
         self.tts_status.configure(text="")
-        try:
-            self.audio_engine.play_data(data, samplerate, key=TTS_KEY)
-        except RuntimeError as e:
-            error(self.root, "Could not speak", str(e))
+
+        def play():
+            try:
+                self.audio_engine.play_data(data, samplerate, key=TTS_KEY)
+            except RuntimeError as e:
+                error(self.root, "Could not speak", str(e))
+        # A spoken line goes down the cable like a clip, so it opens the
+        # chat app's channel the same way one does.
+        self._start_with_ptt(play)
 
     def _tts_saved(self, name, dest):
         self._set_tts_busy(False)

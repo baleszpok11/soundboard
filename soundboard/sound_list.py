@@ -333,6 +333,11 @@ class SoundListMixin:
 
     def _poll_playing(self):
         self._update_playing()
+        # The chat app's talk key is counted against what the engine is
+        # playing rather than against clips, so overlapping clips hold it
+        # once and release it once. Driven from here because this poll is
+        # already the one thing that asks the engine what is going on.
+        self.auto_ptt.update(self.audio_engine.cable_playing())
         self._playing_poll = self.root.after(PLAYING_POLL_MS, self._poll_playing)
 
     @staticmethod
@@ -1194,7 +1199,7 @@ class SoundListMixin:
             border_width=1, border_color=COLOR_BORDER,
         ))
         frame.add(ctk.CTkButton(
-            frame, text="Stop all", command=self.audio_engine.stop_all,
+            frame, text="Stop all", command=self.stop_all_sounds,
             fg_color=COLOR_ERROR, hover_color=COLOR_ERROR_HOVER, text_color=COLOR_ON_ERROR,
         ))
         self.stop_hotkey_button = frame.add(ctk.CTkButton(
@@ -1621,11 +1626,15 @@ class SoundListMixin:
         # stopping, looping and the playing indicator keep working for a
         # group whichever member is playing.
         path = self._pick_clip(sound, key)
-        self.audio_engine.play(
+        # Through the chat app's talk key, which goes down before the
+        # clip does: everything that plays a sound comes through here, so
+        # a hotkey, a click and the list running itself all open the
+        # channel the same way.
+        self._start_with_ptt(lambda: self.audio_engine.play(
             resolve_sound_path(path),
             gain=self._clip_gain(sound, path), loop=sound.get("loop", False), key=key,
             fades=Fades(**sound_fades(sound)),
-        )
+        ))
 
     def preview_sound(self, sound):
         """Play an entry to the monitor alone, never down the cable: a

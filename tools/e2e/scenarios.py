@@ -726,6 +726,119 @@ def monitor_device_choice(board):
         sd.query_devices = real_query
 
 
+class _SentKeys:
+    """Stands in for pynput's Controller, so a run records the keys the
+    app sends instead of typing them into whatever window has focus."""
+
+    def __init__(self):
+        self.events = []
+
+    def press(self, key):
+        self.events.append(("down", str(key)))
+
+    def release(self, key):
+        self.events.append(("up", str(key)))
+
+    @property
+    def held(self):
+        """Whether the last thing we saw was the key going down."""
+        return bool(self.events) and self.events[-1][0] == "down"
+
+
+def auto_push_to_talk(board):
+    """The chat app's talk key: the settings row it is set from, and the
+    poll that holds the key while something is going down the cable.
+
+    The keys are recorded rather than sent - a scenario that really
+    pressed F13 would press it into whatever window is in front - so what
+    this proves is the wiring: that the board's own poll opens and closes
+    the channel against what the engine is playing, and that "Stop all"
+    does not wait out the tail.
+    """
+    app = board.app
+    sent = _SentKeys()
+    app.auto_ptt._controller = sent
+    # The engine has no output device on a machine with no sound card, so
+    # what it is playing is stood in for. What is under test is the poll
+    # that reads it, not the mixer.
+    playing = [False]
+    app.audio_engine.cable_playing = lambda: playing[0]
+
+    board.open_tab("Settings")
+    yield
+    board.shot("auto-ptt-settings")
+    board.expect_visible(app.auto_ptt_checkbox, "the chat app talk key checkbox")
+    board.expect_visible(app.auto_ptt_hotkey_button, "the chat app talk key button")
+    board.expect_fits(app.auto_ptt_hotkey_button, "the chat app talk key button")
+    board.check(app.config["auto_ptt_hotkey"] in app.auto_ptt_hotkey_button.cget("text"),
+                f"the button does not name the key: "
+                f"{app.auto_ptt_hotkey_button.cget('text')!r}")
+    board.check(bool(app.auto_ptt_status.cget("text")),
+                "the row says nothing about what it will do")
+    # Five controls do not fit across the panel at this width, so the row
+    # wraps them. A control that was never placed is invisible and passes
+    # every check that only asks about the ones that were.
+    from soundboard.flow_row import FlowRow
+    row = app.auto_ptt_checkbox.master
+    board.check(isinstance(row, FlowRow), "the talk key controls are not in a flow row")
+    unplaced = [child for child, _, _ in row._items if not child.winfo_ismapped()]
+    board.check(not unplaced,
+                f"{len(unplaced)} of {len(row._items)} talk key controls were "
+                f"never placed")
+    # The row was added above Appearance, which is the last thing in the
+    # panel: a panel that has outgrown its tab loses the bottom of itself.
+    board.expect_visible(app.appearance_switch, "the Appearance row under it")
+    yield
+
+    playing[0] = True
+    yield
+    board.check(sent.held,
+                f"the talk key was not held for a playing clip: {sent.events}")
+    board.check(len(sent.events) == 1,
+                f"the key was pressed more than once: {sent.events}")
+    yield
+    board.check(len(sent.events) == 1,
+                f"the poll pressed the key again while it was held: {sent.events}")
+
+    playing[0] = False
+    yield
+    board.check(not sent.held,
+                f"the talk key was never released: {sent.events}")
+
+    # Stop all closes the channel at once rather than after the tail.
+    playing[0] = True
+    yield
+    board.check(sent.held, f"the key was not held again: {sent.events}")
+    app.stop_all_sounds()
+    board.check(not sent.held,
+                f"'Stop all' left the talk key down: {sent.events}")
+    yield
+
+    # And switching it off lets go of anything held.
+    playing[0] = True
+    yield
+    board.check(sent.held, f"the key was not held a third time: {sent.events}")
+    app.auto_ptt_checkbox.deselect()
+    app._on_toggle_auto_ptt()
+    board.check(not sent.held,
+                f"switching it off left the talk key down: {sent.events}")
+    playing[0] = False
+    yield
+
+
+# The window's own minimum, where a settings panel that has grown too
+# tall for its tab shows it first.
+auto_push_to_talk.geometry = "640x480+60+60"
+# Switched on before the window opens: the settings row is built from the
+# file, and nothing in the app can turn this on from inside a scenario.
+auto_push_to_talk.settings = {
+    "auto_ptt": True, "auto_ptt_hotkey": "<f13>",
+    # No lead, so nothing here waits on one; a short tail, so the release
+    # lands inside a tick.
+    "auto_ptt_lead": 0.0, "auto_ptt_tail": 0.1,
+}
+
+
 SCENARIOS = {
     "board_opens": board_opens,
     "nothing_is_clipped": nothing_is_clipped,
@@ -738,4 +851,5 @@ SCENARIOS = {
     "preview_sound": preview_sound,
     "monitor_device_choice": monitor_device_choice,
     "monitor_volume": monitor_volume,
+    "auto_push_to_talk": auto_push_to_talk,
 }

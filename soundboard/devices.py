@@ -265,9 +265,10 @@ class DeviceMixin:
         self._build_match_controls(frame, 6)
         self._build_stop_fade_controls(frame, 7)
         self._build_mic_controls(frame, 8)
-        self._build_startup_controls(frame, 9)
-        self._build_remote_controls(frame, 10)
-        self._build_appearance_controls(frame, 11)
+        self._build_auto_ptt_controls(frame, 9)
+        self._build_startup_controls(frame, 10)
+        self._build_remote_controls(frame, 11)
+        self._build_appearance_controls(frame, 12)
         return frame
 
     def _preview_device_names(self):
@@ -484,10 +485,15 @@ class DeviceMixin:
     def test_output(self):
         """Play a tone through the output device, so routing can be
         checked without asking someone else if they can hear you."""
-        try:
-            self.audio_engine.play_data(test_tone(), SAMPLE_RATE, key=TEST_TONE_KEY)
-        except RuntimeError as e:
-            error(self.root, "Test output", str(e))
+        def play():
+            try:
+                self.audio_engine.play_data(test_tone(), SAMPLE_RATE, key=TEST_TONE_KEY)
+            except RuntimeError as e:
+                error(self.root, "Test output", str(e))
+        # Down the cable like any other clip, so the chat app's talk key
+        # is held for it too - this is the button people check a call
+        # with.
+        self._start_with_ptt(play)
 
     def _add_volume_row(self, frame, row, text, config_key, engine_attr):
         ctk.CTkLabel(frame, text=text, text_color=COLOR_TEXT_DIM, font=font("small_bold")).grid(

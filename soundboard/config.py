@@ -214,6 +214,20 @@ def prepare_config(config):
     config.setdefault("pause_hotkey", None)
     config.setdefault("next_hotkey", None)
     config.setdefault("prev_hotkey", None)
+    # Holding the chat app's own push-to-talk key while a clip plays, so
+    # a board fired into a call that is set to push to talk is heard.
+    # Off and unset: the key belongs to another application, and there is
+    # nothing sensible to guess. The lead and the tail are kept whether
+    # or not it is switched on, like the duck amount, and default to
+    # enough for an app whose channel opens a moment late.
+    config.setdefault("auto_ptt", False)
+    config.setdefault("auto_ptt_hotkey", None)
+    # "hold" holds the key for the whole clip; "tap" presses it once
+    # before and once after, for an app whose talk key is a toggle.
+    if config.get("auto_ptt_mode") not in ("hold", "tap"):
+        config["auto_ptt_mode"] = "hold"
+    config.setdefault("auto_ptt_lead", 0.1)
+    config.setdefault("auto_ptt_tail", 0.2)
     config.setdefault("close_to_tray", False)
     # The local control channel, so a Stream Deck or a script can fire a
     # sound. Off until it is switched on, and loopback only whatever it

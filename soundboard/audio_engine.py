@@ -859,6 +859,14 @@ class AudioEngine:
             return any(not s.stopping for s in
                        (*self._active_sounds, *self._active_sounds_monitor))
 
+    def cable_playing(self):
+        """Whether a clip is going down the virtual cable, which is what
+        the people in the call hear. Only the output list: a preview
+        plays to the monitor alone, and nobody else has to be able to
+        hear it for it to have worked."""
+        with self._lock:
+            return any(not s.stopping for s in self._active_sounds)
+
     def paused_keys(self):
         """The keys of the clips that are holding rather than playing."""
         with self._lock:

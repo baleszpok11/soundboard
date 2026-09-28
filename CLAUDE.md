@@ -115,6 +115,26 @@ virtual audio cable.
   never spoken. A machine with no engine (a bare Linux without eSpeak)
   is normal - the tab says so instead of failing at the button. Like
   pynput, the driver is a runtime import, so each build names its own
+- Auto push-to-talk: ptt.py is the sending half of the hotkeys - the chat
+  app's own talk key, held while the board plays, for a call set to push
+  to talk. It is counted against what the engine is playing rather than
+  against clips (AudioEngine.cable_playing(), polled by sound_list's
+  _poll_playing), so overlapping clips press it once and release it once,
+  and a monitor-only preview does not open anyone's channel. begin() is
+  called before the audio is queued and returns the lead the clip should
+  wait, because the key has to be down first; it also holds the key over
+  a grace window, since a clip is still being decoded on the engine's
+  worker thread when begin() returns and the poll would otherwise close
+  the channel before the sound arrives. Everything that plays down the
+  cable goes through _start_with_ptt (play_sound, the Speak tab, the test
+  tone), and stop_all_sounds() is what the Stop all button, its hotkey
+  and the remote call so a panic stop does not leave the key down for the
+  tail. Sending keys needs Accessibility on macOS, which is not the Input
+  Monitoring the listener asks for - key_sending_granted() checks the
+  other one, because a failed CGEventPost raises nothing and the setting
+  would otherwise just look broken. Our own synthetic keys cannot fire
+  our own hotkeys: pynput reports them as injected and both HotkeyListener
+  and GlobalHotKeys drop those
 - Fades: _ActiveSound owns its envelope - fade in by frames played, fade
   out by position from the end, and a stop fade that can start anywhere;
   the three multiply. A looping clip fades in once and never fades out,
