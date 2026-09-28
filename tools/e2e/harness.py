@@ -192,9 +192,8 @@ class Board:
         self.app.settings_button.invoke()
 
     def open_tab(self, name):
-        # set() does not fire the tabview's command, which is what moves
-        # the settings panel between its two homes, so call it the way a
-        # click would.
+        # set() does not fire the tabview's command, which is what lifts
+        # the tab so it is drawn, so call it the way a click would.
         self.app.tabview.set(name)
         command = self.app.tabview._command
         if command is not None:
